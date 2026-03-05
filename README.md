@@ -1,9 +1,18 @@
 # VW Dealer Oil Change Availability Tool
 
-Find the soonest available oil change appointment across VW dealerships. Two approaches:
+Find the soonest available oil change appointment across VW dealerships.
 
-1. **Scraper** (`main.py`) — Visits dealer service schedulers with a browser bot and collects the earliest appointment date/time into a spreadsheet.
-2. **AI Research Agent** (`research_agent.py`) — Uses Claude with web search to research dealers, find scheduler URLs, identify platforms, and more.
+## Workflow
+
+1. **Research** — Use AI to find dealers, scheduler URLs, and platforms
+2. **Add dealers** — Add results to `dealers.csv`
+3. **Scrape** — Check appointment availability on dealer websites
+
+```bash
+python cli.py research --location "Minnesota"
+# (add dealers to dealers.csv)
+python cli.py scrape
+```
 
 ## Prerequisites
 
@@ -20,51 +29,81 @@ uv pip install -r requirements.txt
 # Install browser for the scraper
 .venv/bin/playwright install chromium
 
-# For the AI research agent, also install:
-uv pip install anthropic
+# For the AI research agent, set your API key:
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-## Scraper
+## CLI Usage
 
-Visits each dealer's online service scheduler, inputs a VIN, selects oil change, and returns the earliest available appointment.
-
-### Supported platforms
-
-- **Tekion** — hosted scheduler at `tekioncloud.com`
-- **Xtime** — embedded iframe scheduler on dealer websites
-
-### Usage
+All commands are accessed through `cli.py`:
 
 ```bash
-# Basic run (opens a visible browser)
-.venv/bin/python main.py --dealers dealers.csv
-
-# Filter by state
-.venv/bin/python main.py --dealers dealers.csv --state MN
-
-# Headless mode (no browser window)
-.venv/bin/python main.py --dealers dealers.csv --headless
-
-# Output to Excel
-.venv/bin/python main.py --dealers dealers.csv --output results/output.xlsx --excel
-
-# Use a specific VIN
-.venv/bin/python main.py --dealers dealers.csv --vin 1VWSA7A32LC099999
+python cli.py --help
+python cli.py scrape --help
+python cli.py research --help
 ```
 
-### Options
+### Research — find dealers with AI
+
+Uses Claude with web search to find VW dealers, scheduler URLs, platforms, and pricing. No browser needed.
+
+```bash
+# Find all VW dealers in a location
+python cli.py research --location "Minnesota"
+python cli.py research --location "Dallas, TX"
+
+# Include oil change pricing comparison
+python cli.py research --location "Texas" --pricing
+
+# Research a specific dealer
+python cli.py research --dealer "Schmelz Countryside Volkswagen"
+```
+
+| Flag | Description |
+|------|-------------|
+| `--location` | Search for dealers in a location (e.g., `Texas`, `Minneapolis, MN`) |
+| `--dealer` | Research a specific dealer by name |
+| `--pricing` | Include oil change pricing comparison (use with `--location`) |
+| `--dealers` | Path to dealers CSV for context (default: `dealers.csv`) |
+
+One of `--location` or `--dealer` is required.
+
+### Scrape — check appointment availability
+
+Visits each dealer's online service scheduler with a browser, inputs a VIN, selects oil change, and returns the earliest available appointment.
+
+```bash
+# Scrape all dealers in dealers.csv
+python cli.py scrape
+
+# Filter by state
+python cli.py scrape --state MN
+
+# Headless mode (no browser window)
+python cli.py scrape --headless
+
+# Output to Excel
+python cli.py scrape --output results/output.xlsx --excel
+
+# Use a specific VIN
+python cli.py scrape --vin 1VWSA7A32LC099999
+```
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--dealers` | Path to dealers CSV file (required) | — |
+| `--dealers` | Path to dealers CSV file | `dealers.csv` |
 | `--output` | Output file path | `results/output.csv` |
 | `--state` | Filter by state abbreviation (e.g., `MN`) | all |
 | `--vin` | VIN for scheduling lookup | placeholder VIN |
 | `--headless` | Run browser without GUI | off |
 | `--excel` | Output as `.xlsx` instead of CSV | off |
 
-### Output columns
+#### Supported platforms
+
+- **Tekion** — hosted scheduler at `tekioncloud.com`
+- **Xtime** — embedded iframe scheduler on dealer websites
+
+#### Output columns
 
 | Column | Example |
 |--------|---------|
@@ -77,23 +116,6 @@ Visits each dealer's online service scheduler, inputs a VIN, selects oil change,
 | Error | (reason if not successful) |
 | Screenshot Path | results/screenshots/Luther_Westside_20260304.png |
 | URL | (scheduler URL) |
-
-## AI Research Agent
-
-Uses the Claude API with server-side web search to research VW dealers automatically — no browser needed.
-
-```bash
-.venv/bin/python research_agent.py "Find service scheduler URLs for VW dealers in MN"
-.venv/bin/python research_agent.py "Compare oil change prices at VW dealers in Texas"
-.venv/bin/python research_agent.py "What platform does Autobahn VW Fort Worth use?"
-.venv/bin/python research_agent.py "Find all VW dealers in Florida and their scheduler URLs"
-```
-
-The agent automatically:
-- Searches the web for dealer info
-- Reads your existing `dealers.csv` for context
-- Streams results to the terminal in real-time
-- Cites sources with URLs
 
 ## Dealer CSV format
 
