@@ -104,8 +104,8 @@ def main():
     )
     parser.add_argument(
         "--dealers",
-        required=True,
-        help="Path to dealers CSV file",
+        default="dealers.csv",
+        help="Path to dealers CSV file (default: dealers.csv)",
     )
     parser.add_argument(
         "--output",
