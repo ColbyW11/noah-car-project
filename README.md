@@ -6,7 +6,7 @@ Find the soonest available oil change appointment across VW dealerships.
 
 1. **Research** — Use AI to find dealers, scheduler URLs, and platforms
 2. **Add dealers** — Add results to `dealers.csv`
-3. **Scrape** — Check appointment availability on dealer websites
+3. **Scrape** — AI agent navigates dealer websites to check appointment availability
 
 ```bash
 python cli.py research --location "Minnesota"
@@ -16,20 +16,20 @@ python cli.py scrape
 
 ## Prerequisites
 
-- Python 3.9+
+- Python 3.13+
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- An [Anthropic API key](https://console.anthropic.com/)
 
 ## Setup
 
 ```bash
-# Create venv and install dependencies
-uv venv
-uv pip install -r requirements.txt
+# Install dependencies
+uv sync
 
 # Install browser for the scraper
-.venv/bin/playwright install chromium
+uv run playwright install chromium
 
-# For the AI research agent, set your API key:
+# Set your API key (required for both research and scrape commands)
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
@@ -70,7 +70,7 @@ One of `--location` or `--dealer` is required.
 
 ### Scrape — check appointment availability
 
-Visits each dealer's online service scheduler with a browser, inputs a VIN, selects oil change, and returns the earliest available appointment.
+Uses a Claude AI agent to navigate each dealer's online service scheduler. The agent sees the page via screenshots, fills in the VIN, selects oil change, and finds the earliest available appointment — no hardcoded selectors or platform-specific logic needed.
 
 ```bash
 # Scrape all dealers in dealers.csv
@@ -87,6 +87,9 @@ python cli.py scrape --output results/output.xlsx --excel
 
 # Use a specific VIN
 python cli.py scrape --vin 1VWSA7A32LC099999
+
+# Use a cheaper/faster model
+python cli.py scrape --model claude-haiku-4-5
 ```
 
 | Flag | Description | Default |
@@ -97,11 +100,18 @@ python cli.py scrape --vin 1VWSA7A32LC099999
 | `--vin` | VIN for scheduling lookup | placeholder VIN |
 | `--headless` | Run browser without GUI | off |
 | `--excel` | Output as `.xlsx` instead of CSV | off |
+| `--model` | Claude model to use | `claude-sonnet-4-6` |
 
-#### Supported platforms
+#### How the AI agent works
 
-- **Tekion** — hosted scheduler at `tekioncloud.com`
-- **Xtime** — embedded iframe scheduler on dealer websites
+For each dealer, the agent:
+1. Opens the scheduler URL in a Playwright browser
+2. Takes a screenshot and sends it to Claude
+3. Claude decides what to do next (click, fill a field, scroll, etc.)
+4. The action is executed via Playwright, and a new screenshot is taken
+5. This loops until Claude finds the earliest appointment or reports a blocker
+
+The agent works with **any** scheduler platform — no platform-specific code required.
 
 #### Output columns
 
@@ -129,12 +139,24 @@ Schmelz Countryside Volkswagen,https://www.schmelzvw.com/service-schedule.html,x
 |--------|-------------|
 | `name` | Dealer name |
 | `url` | Direct URL to the dealer's service scheduler page |
-| `platform` | `tekion` or `xtime` |
+| `platform` | Scheduler platform (informational only — the AI agent handles any platform) |
 | `state` | Two-letter state code |
+
+## Configuration
+
+Agent settings can be adjusted in `config.py`:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `AGENT_MODEL` | `claude-sonnet-4-6` | Claude model for the scraping agent |
+| `AGENT_MAX_TURNS` | `25` | Max agentic loop iterations per dealer |
+| `SCREENSHOT_WIDTH` | `1024` | Screenshot resize width (smaller = cheaper API calls) |
+| `SCREENSHOT_HEIGHT` | `768` | Screenshot resize height |
+| `REQUEST_DELAY` | `3` | Seconds between dealer requests |
 
 ## Known limitations
 
-- **Tekion sign-in**: Most Tekion schedulers require phone/email verification. Reported as "blocked" unless a guest option exists.
-- **Captchas**: Pages with captcha challenges are flagged as "blocked".
-- **Selector variability**: Dealer pages can differ in layout. Running in headed mode (default) helps debug.
-- **Rate limiting**: 3-second delay between dealers. Adjust `REQUEST_DELAY` in `config.py` if needed.
+- **Sign-in walls**: Some schedulers require phone/email verification. The agent reports these as "blocked".
+- **Captchas**: Pages with captcha challenges are reported as "blocked".
+- **API cost**: Each dealer uses ~15-25 API turns with screenshots. Expect ~$0.10-0.30 per dealer with Sonnet, less with Haiku.
+- **Speed**: Each dealer takes ~60-100 seconds as the agent navigates the site.
