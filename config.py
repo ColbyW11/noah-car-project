@@ -20,3 +20,9 @@ SCREENSHOTS_DIR = "results/screenshots"
 
 # Default headless mode
 DEFAULT_HEADLESS = False
+
+# Claude agent settings
+AGENT_MODEL = "claude-sonnet-4-6"
+AGENT_MAX_TURNS = 25
+SCREENSHOT_WIDTH = 1024
+SCREENSHOT_HEIGHT = 768

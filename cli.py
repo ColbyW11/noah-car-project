@@ -12,11 +12,15 @@ Commands:
 
 import argparse
 import asyncio
+import os
 import sys
 
 
 def cmd_scrape(args):
-    """Run the web scraper."""
+    """Run the AI-powered scraper."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("Error: ANTHROPIC_API_KEY environment variable is not set.")
+        sys.exit(1)
     from main import run
     asyncio.run(run(args))
 
@@ -71,6 +75,10 @@ def main():
     sp_scrape.add_argument(
         "--excel", action="store_true",
         help="Output as Excel (.xlsx) instead of CSV",
+    )
+    sp_scrape.add_argument(
+        "--model", default=None,
+        help="Claude model to use (default: claude-sonnet-4-6, option: claude-haiku-4-5)",
     )
     sp_scrape.set_defaults(func=cmd_scrape)
 

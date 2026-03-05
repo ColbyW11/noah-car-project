@@ -18,20 +18,14 @@ from playwright.async_api import async_playwright
 from config import DEFAULT_VIN, DEFAULT_OUTPUT, DEFAULT_HEADLESS, REQUEST_DELAY
 from dealers import load_dealers
 from output import write_csv, write_excel
-from scrapers.tekion import TekionScraper
-from scrapers.xtime import XtimeScraper
+from scrapers.agent import AgentScraper
 
 
-async def scrape_dealer(browser, dealer, vin, headless):
-    """Scrape a single dealer's scheduler."""
+async def scrape_dealer(browser, dealer, vin, headless, model=None):
+    """Scrape a single dealer's scheduler using AI agent."""
     page = await browser.new_page()
     try:
-        platform = dealer.get("platform", "xtime").lower()
-        if platform == "tekion":
-            scraper = TekionScraper(page, vin, headless)
-        else:
-            scraper = XtimeScraper(page, vin, headless)
-
+        scraper = AgentScraper(page, vin, headless, model=model)
         result = await scraper.scrape(dealer)
         return result
     finally:
@@ -62,7 +56,10 @@ async def run(args):
         for i, dealer in enumerate(dealers):
             print(f"[{i+1}/{len(dealers)}] Scraping {dealer['name']}...")
 
-            result = await scrape_dealer(browser, dealer, args.vin, args.headless)
+            result = await scrape_dealer(
+                browser, dealer, args.vin, args.headless,
+                model=getattr(args, "model", None),
+            )
             results.append(result)
 
             if result["status"] == "success":
