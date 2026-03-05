@@ -1,0 +1,6 @@
+.claude/
+results/
+__pycache__/
+*.pyc
+.venv/
+venv/
