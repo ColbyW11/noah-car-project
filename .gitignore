@@ -4,3 +4,11 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.env
+.env.*
+!.env.example
+.DS_Store
+*.egg-info/
+dist/
+.idea/
+.vscode/
