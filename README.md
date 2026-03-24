@@ -42,7 +42,18 @@ Then run the onboarding to configure it (sets up your LLM API key, browser, etc.
 openclaw onboard
 ```
 
-This walks you through picking an LLM provider (Claude, GPT, etc.) and configuring browser access. Follow the prompts.
+This walks you through picking an LLM provider and configuring browser access. Follow the prompts.
+
+### LLM provider cost
+
+OpenClaw is free, but it needs an LLM API key to work. During onboarding you'll pick a provider:
+
+| Provider | Sign up | Estimated cost per run (5 dealers) |
+|----------|---------|-----------------------------------|
+| Anthropic (Claude) | [console.anthropic.com](https://console.anthropic.com) | ~$0.50–$2.00 |
+| OpenAI (GPT) | [platform.openai.com](https://platform.openai.com) | ~$0.50–$2.00 |
+
+Both require a credit card and a minimum $5 deposit. Each dealer takes ~15–30 agent turns with browser snapshots, so a full run across all 5 dealers costs roughly **$1**.
 
 ## Setup (first time only)
 
