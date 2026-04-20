@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import sys
 from pathlib import Path
 
@@ -29,8 +30,9 @@ REGISTRY_CSV = REPO_ROOT / "data" / "dealer_master.csv"
 log = structlog.get_logger()
 
 
-def _configure_logging() -> None:
+def _configure_logging(debug: bool) -> None:
     # Route logs to stderr so stdout stays clean for JSON piping into jq.
+    level = logging.DEBUG if debug else logging.INFO
     structlog.configure(
         processors=[
             structlog.processors.TimeStamper(fmt="iso"),
@@ -38,6 +40,7 @@ def _configure_logging() -> None:
             structlog.processors.JSONRenderer(),
         ],
         logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+        wrapper_class=structlog.make_filtering_bound_logger(level),
     )
 
 
@@ -66,11 +69,12 @@ async def _scrape(dealer_code: str, headed: bool) -> ScrapeResult | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    _configure_logging()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dealer_code", help="Dealer code in data/dealer_master.csv (e.g. VW0001)")
     parser.add_argument("--headed", action="store_true", help="Show the browser window.")
+    parser.add_argument("--debug", action="store_true", help="Enable DEBUG-level logs (shows every JSON XHR URL).")
     args = parser.parse_args(argv)
+    _configure_logging(debug=args.debug)
 
     result = asyncio.run(_scrape(args.dealer_code, headed=args.headed))
     if result is None:
