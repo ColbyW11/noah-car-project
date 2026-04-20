@@ -34,6 +34,39 @@ Stored outside the repo:
 - `VW_SCRAPER_DRIVE_FOLDER_ID` — the ID of the root Drive folder for outputs.
 - `VW_SCRAPER_SLACK_WEBHOOK` — optional, for failure alerts.
 
+## Scheduled runs (GitHub Actions)
+
+The `daily-scrape` workflow (`.github/workflows/daily-scrape.yml`) runs the
+full pipeline — scrape, Drive sync, alert — daily at **13:00 UTC (≈ 9am ET)**
+and on manual dispatch.
+
+### Required repo secrets
+
+Set these in *Settings → Secrets and variables → Actions*:
+
+- `GCP_SERVICE_ACCOUNT_JSON` — the full JSON body of the Drive service account
+  key (paste it in as-is, including newlines).
+- `VW_SCRAPER_DRIVE_FOLDER_ID` — same ID used locally.
+- `VW_SCRAPER_SLACK_WEBHOOK` — incoming-webhook URL for a Slack channel. If
+  absent, the pipeline runs fine but no alerts are sent.
+
+### Manual dispatch
+
+```bash
+gh workflow run daily-scrape.yml
+gh run watch
+```
+
+Or use the *Actions* tab → *Daily scrape* → *Run workflow*.
+
+### Alert thresholds
+
+- **100% dealer failure** → Slack `:rotating_light:` (error), workflow exit 2.
+- **>25% dealer failure** → Slack `:warning:` (warning), workflow exit 0.
+- **Run-level exception** (scrape or Drive sync raises) → Slack error.
+- **Infrastructure failure** (checkout / setup / Playwright install) → Slack
+  error from a trailing `if: failure()` step.
+
 ## Drive folder layout
 
 See the Storage Layout section of [`SPEC.md`](./SPEC.md).
@@ -49,6 +82,7 @@ src/vw_scraper/
   scrapers/
     base.py             # PlatformScraper protocol
     xtime.py            # Xtime scraper
+    connect_cdk.py      # ConnectCDK scraper
     mykaarma.py         # myKaarma scraper (later)
   storage/
     timeseries.py       # Parquet append logic
@@ -59,6 +93,8 @@ tests/
 scripts/
   scrape_one.py         # CLI: scrape one dealer
   run_daily.py          # CLI: full daily run
+  ci_run.py             # CLI: scrape + Drive sync + alerts (used by CI)
+  sync_drive.py         # CLI: standalone Drive sync
 notebooks/
   analysis.ipynb        # Answers the three core metrics
 data/                   # Local outputs — not committed

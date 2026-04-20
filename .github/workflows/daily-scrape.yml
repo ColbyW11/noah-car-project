@@ -1,0 +1,77 @@
+name: Daily scrape
+
+# Runs the full pipeline unattended: scrape every active dealer, sync raw +
+# processed outputs to Google Drive, and Slack-alert on run-level exceptions or
+# degraded runs (>25% dealer failures). See scripts/ci_run.py for thresholds.
+
+on:
+  schedule:
+    # 13:00 UTC ≈ 9am ET — business hours on the US east coast so dealer
+    # schedulers are live and a zero-slot return isn't ambiguous.
+    - cron: "0 13 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  # Never let a manually-dispatched run collide with the cron run — Drive sync
+  # is idempotent but two concurrent writers to the same partition still risks
+  # `observations.jsonl` ping-ponging between the two runs' results.
+  group: daily-scrape
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VW_SCRAPER_DRIVE_FOLDER_ID: ${{ secrets.VW_SCRAPER_DRIVE_FOLDER_ID }}
+      VW_SCRAPER_SLACK_WEBHOOK: ${{ secrets.VW_SCRAPER_SLACK_WEBHOOK }}
+      VW_SCRAPER_SA_PATH: ${{ runner.temp }}/sa.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv (pinned Python)
+        uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.11"
+
+      - name: Sync dependencies
+        # --frozen enforces the committed uv.lock so CI sees exactly the deps
+        # tested locally. Drop this flag only when intentionally bumping deps.
+        run: uv sync --frozen
+
+      - name: Install Playwright browsers
+        run: uv run playwright install --with-deps chromium
+
+      - name: Write service account JSON from secret
+        # printf '%s' (not echo) preserves the multi-line JSON verbatim.
+        # chmod 600 even though the runner is ephemeral — defense in depth.
+        env:
+          SA_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s' "$SA_JSON" > "$VW_SCRAPER_SA_PATH"
+          chmod 600 "$VW_SCRAPER_SA_PATH"
+
+      - name: Run daily pipeline
+        id: pipeline
+        run: uv run python scripts/ci_run.py
+
+      - name: Alert on infrastructure failure
+        # ci_run.py self-alerts on its own exceptions (outcome=failure),
+        # so we only cover the case where the pipeline step never ran:
+        # setup-uv, uv sync, playwright install, or secret-write failed.
+        if: failure() && steps.pipeline.outcome != 'failure'
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          uv run python - <<'PY'
+          import os
+          from vw_scraper.alerts import send_slack_alert
+          send_slack_alert(
+              f"Daily scrape workflow failed before reaching the pipeline step: {os.environ['RUN_URL']}",
+              severity="error",
+          )
+          PY
