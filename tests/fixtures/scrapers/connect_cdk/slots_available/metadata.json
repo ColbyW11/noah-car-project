@@ -1,0 +1,12 @@
+{
+  "dealer_code": "VW0005",
+  "schedule_url": "https://www.vwnanuet.com/schedule-service.htm",
+  "final_url": "https://www.vwnanuet.com/schedule-service.htm",
+  "user_agent": "vw-oil-availability-scraper/0.1.0 (+mailto:colby.warzecha@gmail.com; research; non-commercial)",
+  "started_at_utc": "2026-04-20T20:38:49.361030+00:00",
+  "finished_at_utc": "2026-04-20T20:39:30.820693+00:00",
+  "interaction_steps": [],
+  "captured_response_count": 38,
+  "iframe_url": "https://api.connectcdk.com/api/nc-cosa-consumer-ui/v1/?subscriptionId=&cid=2001816&PROVIDER=VW_SHIFT&extctxt=VW_SHIFT&KEYWORD=VW_SHIFT&extid=VW_SHIFT",
+  "error": null
+}

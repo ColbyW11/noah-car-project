@@ -66,6 +66,16 @@ PLATFORM_SIGNATURES: tuple[PlatformSignature, ...] = (
             "dfx-widget",
         ),
     ),
+    PlatformSignature(
+        platform=Platform.CONNECT_CDK,
+        url_substrings=(
+            "connectcdk.com",
+        ),
+        html_substrings=(
+            "connectcdk.com",
+            "nc-cosa-consumer-ui",
+        ),
+    ),
 )
 
 # If no vendor signature matches but the page looks like it has its own

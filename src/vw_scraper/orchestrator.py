@@ -37,8 +37,8 @@ from pydantic import BaseModel, ConfigDict
 from . import __version__
 from .models import ScrapeResult, ScrapeStatus
 from .registry import DealerConfig, Platform, load_registry
+from .scrapers import get_scraper, registered_platforms
 from .scrapers.base import PlatformScraper
-from .scrapers.xtime import XtimeScraper
 
 log = structlog.get_logger()
 
@@ -61,7 +61,7 @@ class RunMetadata(BaseModel):
 
 
 def _default_scraper_map() -> dict[Platform, PlatformScraper]:
-    return {Platform.XTIME: XtimeScraper()}
+    return {platform: get_scraper(platform) for platform in registered_platforms()}
 
 
 async def run_daily(
