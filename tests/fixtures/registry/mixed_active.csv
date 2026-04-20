@@ -1,0 +1,6 @@
+dealer_code,dealer_name,dealer_url,schedule_url,platform,zip,region,config_json,active,notes
+VW4001,Active One,https://a1.example,https://a1.example/s,xtime,10001,ne,{},true,
+VW4002,Inactive One,https://i1.example,https://i1.example/s,xtime,20002,ne,{},false,paused
+VW4003,Active Two,https://a2.example,https://a2.example/s,mykaarma,30003,se,{},true,
+VW4004,Inactive Two,https://i2.example,https://i2.example/s,dealer_fx,40004,mw,{},false,closed
+VW4005,Active Three,https://a3.example,https://a3.example/s,custom,50005,sw,{},true,

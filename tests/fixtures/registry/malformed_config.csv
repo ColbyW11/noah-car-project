@@ -1,0 +1,2 @@
+dealer_code,dealer_name,dealer_url,schedule_url,platform,zip,region,config_json,active,notes
+VW3001,Broken Config VW,https://bcv.example,https://bcv.example/service,xtime,60601,midwest,"{not json",true,config_json is not valid JSON

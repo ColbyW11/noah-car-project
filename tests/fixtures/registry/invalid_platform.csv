@@ -1,0 +1,2 @@
+dealer_code,dealer_name,dealer_url,schedule_url,platform,zip,region,config_json,active,notes
+VW2001,Ferrari-Adjacent VW,https://fav.example,https://fav.example/service,ferrari,10001,northeast,{},true,platform value is not in the enum
