@@ -1,0 +1,27 @@
+{
+  "dealer_code": "VW0001",
+  "root_url": "https://www.teddyvolkswagen.com",
+  "final_url": "https://www.teddyvolkswagen.com/ScheduleService",
+  "schedule_url": "https://www.teddyvolkswagen.com/ScheduleService",
+  "platform_detected": "xtime",
+  "config_hints": {
+    "zip_required": false,
+    "vehicle_selection_required": true,
+    "login_wall": false,
+    "iframe_embedded": false
+  },
+  "iframe_srcs": [
+    "data:text/html;base64,PCFET0NUWVBFIGh0bWw+PGh0bWwgbGFuZz0iZW4iPjxoZWFkPjxtZXRhIGNoYXJzZXQ9IlVURi04Ij48bWV0YSBuYW1lPSJ2aWV3cG9ydCIgY29udGVudD0id2lkdGg9ZGV2aWNlLXdpZHRoLCBpbml0aWFsLXNjYWxlPTEuMCI+PHRpdGxlPkNvbnRlbnQgQmxvY2tlZDwvdGl0bGU+PC9oZWFkPjxib2R5PjxwPlRoaXMgY29udGVudCBoYXMgYmVlbiBibG9ja2VkIHBlbmRpbmcgeW91ciBjb25zZW50LjwvcD48L2JvZHk+PC9odG1sPg==",
+    "data:text/html;base64,PCFET0NUWVBFIGh0bWw+PGh0bWwgbGFuZz0iZW4iPjxoZWFkPjxtZXRhIGNoYXJzZXQ9IlVURi04Ij48bWV0YSBuYW1lPSJ2aWV3cG9ydCIgY29udGVudD0id2lkdGg9ZGV2aWNlLXdpZHRoLCBpbml0aWFsLXNjYWxlPTEuMCI+PHRpdGxlPkNvbnRlbnQgQmxvY2tlZDwvdGl0bGU+PC9oZWFkPjxib2R5PjxwPlRoaXMgY29udGVudCBoYXMgYmVlbiBibG9ja2VkIHBlbmRpbmcgeW91ciBjb25zZW50LjwvcD48L2JvZHk+PC9odG1sPg==",
+    "about:srcdoc",
+    "about:blank",
+    "data:text/html;base64,PCFET0NUWVBFIGh0bWw+PGh0bWwgbGFuZz0iZW4iPjxoZWFkPjxtZXRhIGNoYXJzZXQ9IlVURi04Ij48bWV0YSBuYW1lPSJ2aWV3cG9ydCIgY29udGVudD0id2lkdGg9ZGV2aWNlLXdpZHRoLCBpbml0aWFsLXNjYWxlPTEuMCI+PHRpdGxlPkNvbnRlbnQgQmxvY2tlZDwvdGl0bGU+PC9oZWFkPjxib2R5PjxwPlRoaXMgY29udGVudCBoYXMgYmVlbiBibG9ja2VkIHBlbmRpbmcgeW91ciBjb25zZW50LjwvcD48L2JvZHk+PC9odG1sPg==",
+    "data:text/html;base64,PCFET0NUWVBFIGh0bWw+PGh0bWwgbGFuZz0iZW4iPjxoZWFkPjxtZXRhIGNoYXJzZXQ9IlVURi04Ij48bWV0YSBuYW1lPSJ2aWV3cG9ydCIgY29udGVudD0id2lkdGg9ZGV2aWNlLXdpZHRoLCBpbml0aWFsLXNjYWxlPTEuMCI+PHRpdGxlPkNvbnRlbnQgQmxvY2tlZDwvdGl0bGU+PC9oZWFkPjxib2R5PjxwPlRoaXMgY29udGVudCBoYXMgYmVlbiBibG9ja2VkIHBlbmRpbmcgeW91ciBjb25zZW50LjwvcD48L2JvZHk+PC9odG1sPg==",
+    "data:text/html;base64,PCFET0NUWVBFIGh0bWw+PGh0bWwgbGFuZz0iZW4iPjxoZWFkPjxtZXRhIGNoYXJzZXQ9IlVURi04Ij48bWV0YSBuYW1lPSJ2aWV3cG9ydCIgY29udGVudD0id2lkdGg9ZGV2aWNlLXdpZHRoLCBpbml0aWFsLXNjYWxlPTEuMCI+PHRpdGxlPkNvbnRlbnQgQmxvY2tlZDwvdGl0bGU+PC9oZWFkPjxib2R5PjxwPlRoaXMgY29udGVudCBoYXMgYmVlbiBibG9ja2VkIHBlbmRpbmcgeW91ciBjb25zZW50LjwvcD48L2JvZHk+PC9odG1sPg==",
+    "data:text/html;base64,PCFET0NUWVBFIGh0bWw+PGh0bWwgbGFuZz0iZW4iPjxoZWFkPjxtZXRhIGNoYXJzZXQ9IlVURi04Ij48bWV0YSBuYW1lPSJ2aWV3cG9ydCIgY29udGVudD0id2lkdGg9ZGV2aWNlLXdpZHRoLCBpbml0aWFsLXNjYWxlPTEuMCI+PHRpdGxlPkNvbnRlbnQgQmxvY2tlZDwvdGl0bGU+PC9oZWFkPjxib2R5PjxwPlRoaXMgY29udGVudCBoYXMgYmVlbiBibG9ja2VkIHBlbmRpbmcgeW91ciBjb25zZW50LjwvcD48L2JvZHk+PC9odG1sPg==",
+    "data:text/html;base64,PCFET0NUWVBFIGh0bWw+PGh0bWwgbGFuZz0iZW4iPjxoZWFkPjxtZXRhIGNoYXJzZXQ9IlVURi04Ij48bWV0YSBuYW1lPSJ2aWV3cG9ydCIgY29udGVudD0id2lkdGg9ZGV2aWNlLXdpZHRoLCBpbml0aWFsLXNjYWxlPTEuMCI+PHRpdGxlPkNvbnRlbnQgQmxvY2tlZDwvdGl0bGU+PC9oZWFkPjxib2R5PjxwPlRoaXMgY29udGVudCBoYXMgYmVlbiBibG9ja2VkIHBlbmRpbmcgeW91ciBjb25zZW50LjwvcD48L2JvZHk+PC9odG1sPg=="
+  ],
+  "fetched_at_utc": "2026-04-20T03:51:59.046348+00:00",
+  "user_agent": "vw-oil-availability-scraper/0.1.0 (+mailto:colby.warzecha@gmail.com; research; non-commercial)",
+  "error": null
+}
