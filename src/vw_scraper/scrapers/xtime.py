@@ -44,18 +44,20 @@ log = structlog.get_logger()
 DEALER_TIMEOUT_SECONDS = 60
 NAVIGATION_TIMEOUT_MS = 30_000
 VIEWPORT: ViewportSize = {"width": 1280, "height": 900}
-XTIME_HOST_MARKERS = ("xtime", "teamvelocity")
 SLOT_BUDGET_SAFETY_SECONDS = 2.0
+# Cap on response body bytes we'll try to JSON-decode. Xtime envelopes are
+# <100KB in practice; we cap at 1MB to avoid burning CPU on oversize bundles.
+MAX_BODY_BYTES_FOR_PARSE = 1_000_000
 
 # Dummy registration data. SPEC.md line 144 permits dummy data where required
 # to reach availability. Values are identifiably fake: example.com is reserved
-# for docs/testing (RFC 2606); the 555-01xx block is reserved for fictitious
-# numbers (NANP). The scraper will fill these only if a registration modal
-# gates slot rendering; otherwise they're never submitted.
+# for docs/testing (RFC 2606); area code 555 + 555-01xx exchange is reserved
+# for fictitious numbers (NANP). Miles is a plausible mid-life odometer.
 DUMMY_FIRSTNAME = "Test"
 DUMMY_LASTNAME = "User"
 DUMMY_EMAIL = "test@example.com"
-DUMMY_PHONE = "5550100"
+DUMMY_PHONE = "5555550100"
+DUMMY_MILES = "50000"
 
 
 class XtimeParseError(Exception):
@@ -185,9 +187,23 @@ class _ScrapeState:
     source_payload_hash: str | None = None
 
 
-def _is_xtime_host(url: str) -> bool:
-    lowered = url.lower()
-    return any(marker in lowered for marker in XTIME_HOST_MARKERS)
+def _looks_like_json_xhr(response: Response) -> bool:
+    """Cheap pre-filter: only attempt JSON decode on JSON-flavored XHR/fetch.
+
+    Dealers proxy Xtime through their own domains (e.g. Teddy VW routes
+    scheduling through `teddyvolkswagen.com/api/ServiceScheduler/*`), so
+    host-based filtering drops the actual slot endpoint. Filter by resource
+    type + content-type instead — broader but still keeps us from parsing
+    HTML, images, or analytics beacons.
+    """
+    try:
+        resource_type = response.request.resource_type
+    except PlaywrightError:
+        return False
+    if resource_type not in ("xhr", "fetch"):
+        return False
+    content_type = response.headers.get("content-type", "").lower()
+    return "json" in content_type
 
 
 class XtimeScraper:
@@ -366,27 +382,30 @@ async def _handle_response(
     slot_future: asyncio.Future[tuple[list[datetime], bytes]],
     bound_log: Any,
 ) -> None:
-    """Parse one network response; resolve `slot_future` on first slot hit.
+    """Parse any JSON XHR on the page; resolve `slot_future` on first slot hit.
 
-    Silently ignores anything that isn't a parseable Xtime slot envelope —
-    we can't know in advance which of the ~10 xtime/teamvelocity XHRs is the
-    slot endpoint, so we try every one and let the parser filter.
+    We don't know the slot endpoint URL ahead of time and it may live on the
+    dealer's own domain (Teddy VW proxies through `/api/ServiceScheduler/*`),
+    so we try every JSON XHR and let `parse_slots_from_payload`'s strict
+    envelope check filter. The per-response work is bounded by response size
+    and JSON-parsing speed, so this scales fine.
     """
     if slot_future.done():
         return
-    if not _is_xtime_host(response.url):
+    if not _looks_like_json_xhr(response):
         return
     try:
         body_bytes = await response.body()
     except PlaywrightError:
         return
-    try:
-        body_text = body_bytes.decode("utf-8")
-    except UnicodeDecodeError:
+    if len(body_bytes) > MAX_BODY_BYTES_FOR_PARSE:
         return
     try:
-        payload = json.loads(body_text)
-    except json.JSONDecodeError:
+        payload = json.loads(body_bytes)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return
+    bound_log.debug("json_xhr_seen", url=response.url, status=response.status)
+    if not isinstance(payload, dict):
         return
     try:
         slots = parse_slots_from_payload(payload)
@@ -398,44 +417,104 @@ async def _handle_response(
 
 
 async def _walk_xtime_form(page: Page, state: _ScrapeState, bound_log: Any) -> None:
-    """Best-effort walk: vehicle → service → registration modal (dummy data).
+    """Multi-phase walk of the Xtime flow.
 
-    Every step is optional — if a selector doesn't match, we no-op and move
-    on. The slot XHR may fire during any of these steps; `_handle_response`
-    catches it regardless.
+    Shape derived from VW0001 (Teddy VW), which is representative of the
+    dealer.com + Xtime embed pattern seen on other dealers:
+      1. Splash — dismiss cookie banner, click "Next" to enter.
+      2. Vehicle form — pick "Choose my car" vehicle-type radio, select
+         year/make/model, fill miles + phone, submit.
+      3. Service selection — click oil-change tile.
+      4. Optional registration modal (some dealers gate here, not VW0001).
+
+    Every step is best-effort: non-matching selectors no-op. The slot XHR
+    may fire during any phase; `_handle_response` catches it regardless.
     """
+    # Phase 1: dismiss cookie consent banner if present, then enter the flow.
     for label, selector in (
-        ("year", "select[name*='year' i]"),
-        ("make", "select[name*='make' i]"),
-        ("model", "select[name*='model' i]"),
-    ):
-        if await _try_select_first_real_option(page, selector, label, state, bound_log):
-            await asyncio.sleep(0.5)
-
-    for label, selector in (
-        ("continue button", "button:has-text('Continue')"),
-        ("next button", "button:has-text('Next')"),
-        ("get started button", "button:has-text('Get Started')"),
-        ("schedule service link", "a:has-text('Schedule Service')"),
+        ("cookie allow", "button.ca-button-opt-in:has-text('Allow')"),
+        ("cookie deny", "button.ca-button-opt-in:has-text('Deny')"),
     ):
         if await _try_click(page, selector, label, state, bound_log):
-            await asyncio.sleep(1.0)
+            break
 
+    for label, selector in (
+        ("splash next", "button:has-text('Next')"),
+        ("splash get started", "button:has-text('Get Started')"),
+        ("splash continue", "button:has-text('Continue')"),
+        ("splash schedule service", "a:has-text('Schedule Service')"),
+    ):
+        if await _try_click(page, selector, label, state, bound_log):
+            await asyncio.sleep(2.0)
+            break
+
+    # Phase 2: vehicle form.
+    # "Choose my car" radio makes year/make/model selects active on Teddy VW.
+    await _try_click(
+        page,
+        "label:has-text('Choose my car')",
+        "vehicle type: choose my car",
+        state,
+        bound_log,
+    )
+    await asyncio.sleep(0.8)
+
+    # Pick a year/make/model triple where the make list has a real VW option.
+    # Xtime's make list is populated by year (cascading XHR), and "future" years
+    # sometimes return only 'OTHER' placeholder data. We walk years until we
+    # get a non-placeholder make — preferring Volkswagen on a VW dealer.
+    await _pick_vehicle_triple(page, state, bound_log)
+
+    await _try_fill(
+        page,
+        "input#miles, input[placeholder*='Miles' i], input[name*='miles' i]",
+        DUMMY_MILES,
+        "miles",
+        state,
+        bound_log,
+    )
+    await _try_fill(
+        page,
+        "input#phone, input[type='tel'], input[name*='phone' i]",
+        DUMMY_PHONE,
+        "phone",
+        state,
+        bound_log,
+    )
+
+    for label, selector in (
+        ("vehicle form submit", "button[type='submit']:has-text('Next')"),
+        ("vehicle form next (fallback)", "button:has-text('Next')"),
+    ):
+        if await _try_click(page, selector, label, state, bound_log):
+            await asyncio.sleep(2.5)
+            break
+
+    # Phase 3: service selection.
     for label, selector in (
         ("oil change tile", "*:has-text('Oil Change')"),
         ("oil + filter tile", "*:has-text('Oil & Filter')"),
         ("oil filter tile", "*:has-text('Oil and Filter')"),
     ):
         if await _try_click(page, selector, label, state, bound_log):
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(2.0)
             break
 
+    # Phase 3b: some dealers want a "Next" / "Continue" after picking service.
+    for label, selector in (
+        ("post-service next", "button:has-text('Next')"),
+        ("post-service continue", "button:has-text('Continue')"),
+    ):
+        if await _try_click(page, selector, label, state, bound_log):
+            await asyncio.sleep(2.0)
+            break
+
+    # Phase 4: optional registration modal (dealer-dependent).
     filled_any = False
     for label, selector, value in (
-        ("firstname", "input[name*='first' i], input[placeholder*='first' i]", DUMMY_FIRSTNAME),
-        ("lastname", "input[name*='last' i], input[placeholder*='last' i]", DUMMY_LASTNAME),
-        ("email", "input[type='email'], input[name*='email' i]", DUMMY_EMAIL),
-        ("phone", "input[type='tel'], input[name*='phone' i]", DUMMY_PHONE),
+        ("firstname", "input[name*='first' i], input[placeholder*='first' i], input#firstName", DUMMY_FIRSTNAME),
+        ("lastname", "input[name*='last' i], input[placeholder*='last' i], input#lastName", DUMMY_LASTNAME),
+        ("email", "input[type='email'], input[name*='email' i], input#email", DUMMY_EMAIL),
     ):
         if await _try_fill(page, selector, value, label, state, bound_log):
             filled_any = True
@@ -448,7 +527,7 @@ async def _walk_xtime_form(page: Page, state: _ScrapeState, bound_log: Any) -> N
             ("registration submit", "button:has-text('Submit')"),
         ):
             if await _try_click(page, selector, label, state, bound_log):
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(2.0)
                 break
 
 
@@ -496,17 +575,140 @@ async def _try_select_first_real_option(
     state: _ScrapeState,
     bound_log: Any,
 ) -> bool:
+    """Select the first real <option> (skipping a 'Select…' placeholder).
+
+    Cascading dropdowns (year → make → model on Xtime) populate their
+    downstream options via XHR. We poll for a real option to appear before
+    trying to select — otherwise select_option picks the placeholder and
+    downstream validation fails silently on form submit.
+    """
     try:
         sel = page.locator(selector).first
         await sel.wait_for(state="visible", timeout=2_500)
-        options = await sel.locator("option").all_inner_texts()
-        index = 1 if len(options) > 1 else 0
-        await sel.select_option(index=index, timeout=2_500)
     except (PlaywrightTimeoutError, PlaywrightError):
         return False
+
+    real_value = await _wait_for_select_real_option(sel, timeout_s=6.0)
+    if real_value is None:
+        bound_log.debug("step_select_empty", label=label)
+        return False
+
+    try:
+        await sel.select_option(value=real_value, timeout=2_500)
+    except (PlaywrightTimeoutError, PlaywrightError):
+        return False
+
     state.interaction_steps += 1
-    bound_log.debug("step_select", label=label)
+    bound_log.debug("step_select", label=label, value=real_value)
     return True
+
+
+async def _pick_vehicle_triple(page: Page, state: _ScrapeState, bound_log: Any) -> None:
+    """Pick year → make → model. Skip year/make combinations that yield only 'OTHER'.
+
+    Cascading dropdowns on Xtime mean make depends on year, model depends on
+    make. We iterate recent years, preferring one whose make list contains a
+    real (non-'OTHER') option — typically 'VOLKSWAGEN' on a VW dealer. Falls
+    back to any first-real-option combination if nothing matches.
+    """
+    try:
+        year_sel = page.locator("select#year, select[name*='year' i]").first
+        await year_sel.wait_for(state="visible", timeout=3_000)
+    except (PlaywrightTimeoutError, PlaywrightError):
+        return
+
+    try:
+        year_values_raw = await year_sel.locator("option").evaluate_all(
+            "(nodes) => nodes.map(n => n.value)"
+        )
+    except PlaywrightError:
+        return
+    year_values: list[str] = [v for v in year_values_raw if isinstance(v, str) and v]
+    if not year_values:
+        return
+
+    for year_value in year_values[:5]:
+        try:
+            await year_sel.select_option(value=year_value, timeout=2_500)
+        except (PlaywrightTimeoutError, PlaywrightError):
+            continue
+        await asyncio.sleep(1.2)
+
+        try:
+            make_sel = page.locator("select#make, select[name*='make' i]").first
+            await make_sel.wait_for(state="visible", timeout=2_500)
+        except (PlaywrightTimeoutError, PlaywrightError):
+            continue
+
+        real_makes = await _wait_for_non_other_option(make_sel, timeout_s=5.0)
+        if not real_makes:
+            bound_log.debug("year_rejected_no_real_make", year=year_value)
+            continue
+
+        make_value = "VOLKSWAGEN" if "VOLKSWAGEN" in real_makes else real_makes[0]
+        try:
+            await make_sel.select_option(value=make_value, timeout=2_500)
+        except (PlaywrightTimeoutError, PlaywrightError):
+            continue
+        state.interaction_steps += 2  # year + make
+        bound_log.debug("step_select", label="year", value=year_value)
+        bound_log.debug("step_select", label="make", value=make_value)
+        await asyncio.sleep(1.2)
+
+        try:
+            model_sel = page.locator("select#model, select[name*='model' i]").first
+            await model_sel.wait_for(state="visible", timeout=2_500)
+        except (PlaywrightTimeoutError, PlaywrightError):
+            return  # year+make picked; skip model and let form submit handle it
+
+        model_value = await _wait_for_select_real_option(model_sel, timeout_s=5.0)
+        if model_value is None:
+            return
+        try:
+            await model_sel.select_option(value=model_value, timeout=2_500)
+        except (PlaywrightTimeoutError, PlaywrightError):
+            return
+        state.interaction_steps += 1
+        bound_log.debug("step_select", label="model", value=model_value)
+        return
+
+
+async def _wait_for_non_other_option(sel: Any, timeout_s: float) -> list[str]:
+    """Poll for <option> values that are real and not the 'OTHER' placeholder.
+
+    Xtime returns 'OTHER' as a catch-all when a vendor-year combination has
+    no catalogued models — picking it reliably breaks downstream scheduling.
+    """
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            values = await sel.locator("option").evaluate_all(
+                "(nodes) => nodes.map(n => n.value)"
+            )
+        except PlaywrightError:
+            values = []
+        real = [v for v in values if isinstance(v, str) and v and v != "OTHER"]
+        if real:
+            return real
+        await asyncio.sleep(0.25)
+    return []
+
+
+async def _wait_for_select_real_option(sel: Any, timeout_s: float) -> str | None:
+    """Poll the <select> for a non-empty option value. Returns the value or None."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            values = await sel.locator("option").evaluate_all(
+                "(nodes) => nodes.map(n => n.value)"
+            )
+        except PlaywrightError:
+            values = []
+        for v in values:
+            if isinstance(v, str) and v:
+                return v
+        await asyncio.sleep(0.25)
+    return None
 
 
 def _error_result(
