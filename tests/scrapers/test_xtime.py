@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from vw_scraper.registry import Platform
+from vw_scraper.models import ScrapeStatus
+from vw_scraper.registry import Platform, load_registry
 from vw_scraper.scrapers.base import PlatformScraper
 from vw_scraper.scrapers.xtime import (
     XtimeParseError,
@@ -20,6 +21,9 @@ from vw_scraper.scrapers.xtime import (
     detect_login_wall,
     parse_slots_from_payload,
 )
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REGISTRY_CSV = REPO_ROOT / "data" / "dealer_master.csv"
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "scrapers" / "xtime"
 
@@ -114,8 +118,46 @@ def test_xtime_scraper_satisfies_protocol() -> None:
     assert scraper.platform_name == Platform.XTIME.value
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
-async def test_xtime_scrape_is_stubbed_until_slice_4() -> None:
-    scraper = XtimeScraper()
-    with pytest.raises(NotImplementedError, match="Slice 4"):
-        await scraper.scrape(dealer=None, browser=None)  # type: ignore[arg-type]
+async def test_xtime_scrape_vw0001_live() -> None:
+    """Live end-to-end scrape of VW0001. Skipped unless `pytest -m live`.
+
+    Accepts either a successful result with ≥1 slot or a loud error with a
+    recognized prefix — CLAUDE.md error-handling convention. "The site has no
+    availability right now" is a valid outcome that shouldn't fail the test.
+    """
+    from playwright.async_api import async_playwright
+
+    dealers = {d.dealer_code: d for d in load_registry(REGISTRY_CSV)}
+    dealer = dealers["VW0001"]
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        try:
+            result = await XtimeScraper().scrape(dealer, browser)
+        finally:
+            await browser.close()
+
+    assert result.dealer_code == "VW0001"
+    assert result.platform is Platform.XTIME
+    assert result.scraper_version  # populated from package __version__
+
+    if result.scrape_status is ScrapeStatus.SUCCESS:
+        assert result.slot_count >= 1
+        assert result.first_available_ts is not None
+        assert result.first_available_ts.tzinfo is not None
+        assert result.scheduling_flow_seconds is not None
+        assert result.scheduling_flow_seconds > 0
+        assert result.lead_time_hours is not None
+        assert result.source_payload_hash is not None
+        assert result.source_payload_hash.startswith("sha256:")
+    else:
+        assert result.scrape_status is ScrapeStatus.ERROR
+        assert result.error_message is not None
+        assert result.error_message.split(":", 1)[0] in {
+            "TIMEOUT",
+            "PARSE",
+            "NAVIGATION",
+            "UNEXPECTED",
+        }
