@@ -1,0 +1,38 @@
+{
+  "success": true,
+  "code": null,
+  "message": "Success",
+  "items": [
+    {
+      "startDateTime": "2026-04-20T09:00:00-04:00",
+      "displayTime": "9:00 AM",
+      "isAvailable": true,
+      "advisorId": null
+    },
+    {
+      "startDateTime": "2026-04-20T10:30:00-04:00",
+      "displayTime": "10:30 AM",
+      "isAvailable": true,
+      "advisorId": null
+    },
+    {
+      "startDateTime": "2026-04-20T13:00:00-04:00",
+      "displayTime": "1:00 PM",
+      "isAvailable": true,
+      "advisorId": null
+    },
+    {
+      "startDateTime": "2026-04-21T08:00:00-04:00",
+      "displayTime": "8:00 AM",
+      "isAvailable": true,
+      "advisorId": null
+    },
+    {
+      "startDateTime": "2026-04-21T15:30:00-04:00",
+      "displayTime": "3:30 PM",
+      "isAvailable": true,
+      "advisorId": null
+    }
+  ],
+  "errorMsgForEndUser": []
+}

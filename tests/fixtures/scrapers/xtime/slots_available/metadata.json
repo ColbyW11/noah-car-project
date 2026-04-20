@@ -1,0 +1,13 @@
+{
+  "dealer_code": "VW0001",
+  "schedule_url": "https://www.teddyvolkswagen.com/ScheduleService",
+  "final_url": "https://www.teddyvolkswagen.com/ScheduleService",
+  "user_agent": "vw-oil-availability-scraper/0.1.0 (+mailto:colby.warzecha@gmail.com; research; non-commercial)",
+  "started_at_utc": "2026-04-20T04:10:38.032056+00:00",
+  "finished_at_utc": "2026-04-20T04:11:15.258633+00:00",
+  "interaction_steps": [
+    "clicked: next button (button:has-text('Next'))"
+  ],
+  "captured_response_count": 12,
+  "error": null
+}
