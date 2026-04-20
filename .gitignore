@@ -1,14 +1,40 @@
-.claude/
-results/
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Virtual env
 .venv/
 venv/
+
+# Tooling caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets and env
 .env
 .env.*
 !.env.example
+
+# Editors / OS
 .DS_Store
-*.egg-info/
-dist/
 .idea/
 .vscode/
+
+# Claude local state
+.claude/
+
+# Legacy artifact from prior project iteration
+results/
+
+# Local data outputs — raw observations, processed parquet, reports.
+# The dealer registry (data/dealer_master.csv) is source-of-truth and IS committed.
+data/raw/
+data/processed/
+data/reports/
+
+# Test fixtures ARE committed (tests/fixtures/ — do not ignore).
