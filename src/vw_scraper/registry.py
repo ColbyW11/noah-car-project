@@ -20,6 +20,7 @@ class Platform(StrEnum):
     XTIME = "xtime"
     MYKAARMA = "mykaarma"
     DEALER_FX = "dealer_fx"
+    CONNECT_CDK = "connect_cdk"
     CUSTOM = "custom"
     UNKNOWN = "unknown"
 

@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Verify your identity — CDK COSA</title>
+</head>
+<body>
+  <div class="otp-container">
+    <h2>OTP verification required</h2>
+    <p>Please sign in to continue. Enter the code we sent to your phone.</p>
+    <form action="/verify" method="POST">
+      <label for="code">Temporary access code</label>
+      <input type="text" id="code" name="code" required>
+      <button type="submit" class="verify-btn">Verify</button>
+    </form>
+  </div>
+</body>
+</html>

@@ -3,7 +3,7 @@
   "root_url": "https://vwnanuet.com",
   "final_url": "https://www.vwnanuet.com/schedule-service.htm",
   "schedule_url": "https://www.vwnanuet.com/schedule-service.htm",
-  "platform_detected": "unknown",
+  "platform_detected": "connect_cdk",
   "config_hints": {
     "zip_required": false,
     "vehicle_selection_required": false,

@@ -1,0 +1,35 @@
+{
+  "availableSlots": [
+    {
+      "startDateTime": "2026-04-21T08:00:00-04:00",
+      "displayTime": "8:00 AM",
+      "isAvailable": true,
+      "appointmentLength": 30,
+      "advisorId": null
+    },
+    {
+      "startDateTime": "2026-04-21T10:30:00-04:00",
+      "displayTime": "10:30 AM",
+      "isAvailable": true,
+      "appointmentLength": 30,
+      "advisorId": null
+    },
+    {
+      "startDateTime": "2026-04-21T13:00:00-04:00",
+      "displayTime": "1:00 PM",
+      "isAvailable": true,
+      "appointmentLength": 30,
+      "advisorId": null
+    },
+    {
+      "startDateTime": "2026-04-22T09:00:00-04:00",
+      "displayTime": "9:00 AM",
+      "isAvailable": true,
+      "appointmentLength": 30,
+      "advisorId": null
+    }
+  ],
+  "cid": 2001816,
+  "providerId": "COSA",
+  "timezone": "America/New_York"
+}

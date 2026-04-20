@@ -38,7 +38,7 @@ Secondary goal: enable a "find me the fastest oil change near me" product lookup
 | `dealer_name` | str | Display name. |
 | `dealer_url` | str | Root URL of dealer site. |
 | `schedule_url` | str | Direct URL to the scheduling page (skip navigation where possible). |
-| `platform` | enum | `xtime` \| `mykaarma` \| `dealer_fx` \| `custom` \| `unknown` |
+| `platform` | enum | `xtime` \| `mykaarma` \| `dealer_fx` \| `connect_cdk` \| `custom` \| `unknown` |
 | `zip` | str | Dealer ZIP (sometimes required by scheduling widgets). |
 | `region` | str | For geographic aggregations. |
 | `config_json` | str | JSON blob with dealer-specific overrides (vehicle to select, any quirks). |
