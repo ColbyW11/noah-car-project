@@ -1,0 +1,3 @@
+dealer_code,dealer_name,dealer_url,schedule_url,platform,zip,region,config_json,active,notes
+VW1001,Alpine VW,https://alpinevw.example,https://alpinevw.example/service,xtime,80202,mountain,"{""vehicle"": ""Jetta"", ""requires_zip"": true}",true,primary pilot dealer
+VW1002,Bay VW,https://bayvw.example,https://bayvw.example/schedule,mykaarma,94103,bay_area,{},true,
