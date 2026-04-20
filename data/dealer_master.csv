@@ -1,6 +1,6 @@
 dealer_code,dealer_name,dealer_url,schedule_url,platform,zip,region,config_json,active,notes
-VW0001,TBD Dealer 1,,,unknown,,,{},true,Fill in during Slice 2
-VW0002,TBD Dealer 2,,,unknown,,,{},true,Fill in during Slice 2
-VW0003,TBD Dealer 3,,,unknown,,,{},true,Fill in during Slice 2
-VW0004,TBD Dealer 4,,,unknown,,,{},true,Fill in during Slice 2
-VW0005,TBD Dealer 5,,,unknown,,,{},true,Fill in during Slice 2
+VW0001,Teddyvolkswagen,https://www.teddyvolkswagen.com,https://www.teddyvolkswagen.com/ScheduleService,xtime,,,"{""zip_required"": false, ""vehicle_selection_required"": true, ""login_wall"": false, ""iframe_embedded"": false}",true,
+VW0002,Gojeffvw,https://www.gojeffvw.com,,unknown,,,"{""zip_required"": false, ""vehicle_selection_required"": false, ""login_wall"": false, ""iframe_embedded"": false}",true,NAVIGATION: robots.txt disallows root URL
+VW0003,Piazzavw,https://piazzavw.com,,unknown,,,"{""zip_required"": false, ""vehicle_selection_required"": false, ""login_wall"": false, ""iframe_embedded"": false}",true,TIMEOUT: exceeded 60s hard cap
+VW0004,Vwofwestislip,https://vwofwestislip.com,https://www.vwofwestislip.com/scheduleservice,xtime,,,"{""zip_required"": false, ""vehicle_selection_required"": true, ""login_wall"": false, ""iframe_embedded"": true}",true,
+VW0005,Vwnanuet,https://vwnanuet.com,https://www.vwnanuet.com/schedule-service.htm,unknown,,,"{""zip_required"": false, ""vehicle_selection_required"": false, ""login_wall"": false, ""iframe_embedded"": true, ""iframe_src_pattern"": ""api.connectcdk.com""}",true,

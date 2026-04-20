@@ -28,9 +28,7 @@ def test_load_registry_returns_active_dealers_from_starter_csv() -> None:
         "VW0004",
         "VW0005",
     ]
-    assert all(d.platform is Platform.UNKNOWN for d in dealers)
     assert all(d.active for d in dealers)
-    assert all(d.config_json == {} for d in dealers)
 
 
 def test_load_registry_parses_valid_csv() -> None:

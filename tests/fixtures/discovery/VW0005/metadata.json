@@ -1,0 +1,23 @@
+{
+  "dealer_code": "VW0005",
+  "root_url": "https://vwnanuet.com",
+  "final_url": "https://www.vwnanuet.com/schedule-service.htm",
+  "schedule_url": "https://www.vwnanuet.com/schedule-service.htm",
+  "platform_detected": "unknown",
+  "config_hints": {
+    "zip_required": false,
+    "vehicle_selection_required": false,
+    "login_wall": false,
+    "iframe_embedded": true,
+    "iframe_src_pattern": "api.connectcdk.com"
+  },
+  "iframe_srcs": [
+    "https://api.connectcdk.com/api/nc-cosa-consumer-ui/v1/?subscriptionId=&cid=2001816&PROVIDER=VW_SHIFT&extctxt=VW_SHIFT&KEYWORD=VW_SHIFT&extid=VW_SHIFT",
+    "https://digital-retail.autodriven.com/assets/orchestrator/v7-376-0/index.html?clientTokens=3cab1745-f421-434f-a81b-8f9aba6dfcad&capone_debug=false&data-page-type=SRP&c1-ln-host=aHR0cHM6Ly93d3cudnduYW51ZXQuY29t",
+    "data:text/html;base64,PCFET0NUWVBFIGh0bWw+PGh0bWwgbGFuZz0iZW4iPjxoZWFkPjxtZXRhIGNoYXJzZXQ9IlVURi04Ij48bWV0YSBuYW1lPSJ2aWV3cG9ydCIgY29udGVudD0id2lkdGg9ZGV2aWNlLXdpZHRoLCBpbml0aWFsLXNjYWxlPTEuMCI+PHRpdGxlPkNvbnRlbnQgQmxvY2tlZDwvdGl0bGU+PC9oZWFkPjxib2R5PjxwPlRoaXMgY29udGVudCBoYXMgYmVlbiBibG9ja2VkIHBlbmRpbmcgeW91ciBjb25zZW50LjwvcD48L2JvZHk+PC9odG1sPg==",
+    "data:text/html;base64,PCFET0NUWVBFIGh0bWw+PGh0bWwgbGFuZz0iZW4iPjxoZWFkPjxtZXRhIGNoYXJzZXQ9IlVURi04Ij48bWV0YSBuYW1lPSJ2aWV3cG9ydCIgY29udGVudD0id2lkdGg9ZGV2aWNlLXdpZHRoLCBpbml0aWFsLXNjYWxlPTEuMCI+PHRpdGxlPkNvbnRlbnQgQmxvY2tlZDwvdGl0bGU+PC9oZWFkPjxib2R5PjxwPlRoaXMgY29udGVudCBoYXMgYmVlbiBibG9ja2VkIHBlbmRpbmcgeW91ciBjb25zZW50LjwvcD48L2JvZHk+PC9odG1sPg=="
+  ],
+  "fetched_at_utc": "2026-04-20T03:53:26.795711+00:00",
+  "user_agent": "vw-oil-availability-scraper/0.1.0 (+mailto:colby.warzecha@gmail.com; research; non-commercial)",
+  "error": null
+}

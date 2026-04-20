@@ -1,0 +1,37 @@
+{
+  "dealer_code": "VW0004",
+  "root_url": "https://vwofwestislip.com",
+  "final_url": "https://www.vwofwestislip.com/scheduleservice",
+  "schedule_url": "https://www.vwofwestislip.com/scheduleservice",
+  "platform_detected": "xtime",
+  "config_hints": {
+    "zip_required": false,
+    "vehicle_selection_required": true,
+    "login_wall": false,
+    "iframe_embedded": true
+  },
+  "iframe_srcs": [
+    "https://www.googletagmanager.com/ns.html?id=GTM-MT64F4S",
+    "about:srcdoc",
+    "about:blank",
+    "https://dsv5.dashdictionary.com/_/service_worker/63b0/sw_iframe.html?origin=https%3A%2F%2Fwww.vwofwestislip.com&1p=1",
+    "https://volkswagenamerica.demdex.net/dest5.html?d_nsid=0#https%3A%2F%2Fwww.vwofwestislip.com",
+    "https://insight.adsrvr.org/track/cei?advertiser_id=pfykrok&cookie_sync=1&upv=3.0.0&upid=o2vnkvd&ref=https://www.vwofwestislip.com/scheduleservice",
+    "https://insight.adsrvr.org/track/cei?advertiser_id=pfykrok&cookie_sync=1&upv=3.0.0&upid=o2vnkvd&ref=https://www.vwofwestislip.com/scheduleservice",
+    "https://insight.adsrvr.org/track/cei?advertiser_id=pfykrok&cookie_sync=1&upv=3.0.0&upid=o2vnkvd&ref=https://www.vwofwestislip.com/scheduleservice",
+    "https://insight.adsrvr.org/track/cei?advertiser_id=pfykrok&cookie_sync=1&upv=3.0.0&upid=o2vnkvd&ref=https://www.vwofwestislip.com/scheduleservice",
+    "https://match.adsrvr.org/track/cmf/generic?ttd_pid=pubmatic",
+    "https://match.adsrvr.org/track/cmf/generic?ttd_pid=bidswitch",
+    "https://match.adsrvr.org/track/cmf/generic?ttd_pid=pubmatic",
+    "https://match.adsrvr.org/track/cmf/generic?ttd_pid=bidswitch",
+    "https://match.adsrvr.org/track/cmf/generic?ttd_pid=bidswitch",
+    "https://match.adsrvr.org/track/cmf/generic?ttd_pid=pubmatic",
+    "https://match.adsrvr.org/track/cmf/generic?ttd_pid=bidswitch",
+    "https://match.adsrvr.org/track/cmf/generic?ttd_pid=pubmatic",
+    "https://api.drivecentric.com/external/empty.html",
+    "https://ignitify-chat-static.drivecentric.io/#/?ignitifyId=a1c4f69a-2252-409a-8ad2-5a371a75175a&visitorId=55f64628-6e4c-480d-bfba-d8f9923fe100&isInIframe=true"
+  ],
+  "fetched_at_utc": "2026-04-20T03:53:19.460444+00:00",
+  "user_agent": "vw-oil-availability-scraper/0.1.0 (+mailto:colby.warzecha@gmail.com; research; non-commercial)",
+  "error": null
+}

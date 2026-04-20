@@ -1,0 +1,17 @@
+{
+  "dealer_code": "VW0002",
+  "root_url": "https://www.gojeffvw.com",
+  "final_url": "",
+  "schedule_url": "",
+  "platform_detected": "unknown",
+  "config_hints": {
+    "zip_required": false,
+    "vehicle_selection_required": false,
+    "login_wall": false,
+    "iframe_embedded": false
+  },
+  "iframe_srcs": [],
+  "fetched_at_utc": "2026-04-20T03:51:59.179970+00:00",
+  "user_agent": "vw-oil-availability-scraper/0.1.0 (+mailto:colby.warzecha@gmail.com; research; non-commercial)",
+  "error": "NAVIGATION: robots.txt disallows root URL"
+}
