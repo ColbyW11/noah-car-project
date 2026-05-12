@@ -31,7 +31,10 @@ jobs:
     env:
       VW_SCRAPER_DRIVE_FOLDER_ID: ${{ secrets.VW_SCRAPER_DRIVE_FOLDER_ID }}
       VW_SCRAPER_SLACK_WEBHOOK: ${{ secrets.VW_SCRAPER_SLACK_WEBHOOK }}
-      VW_SCRAPER_SA_PATH: ${{ runner.temp }}/sa.json
+      # /tmp is writable on ubuntu-latest and the runner is ephemeral, so we
+      # don't need `runner.temp` (which is step-context only and fails workflow
+      # parsing at job-env level — caused the 2026-04-21 push run to fail in 0s).
+      VW_SCRAPER_SA_PATH: /tmp/sa.json
     steps:
       - name: Checkout
         uses: actions/checkout@v4
