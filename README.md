@@ -2,7 +2,7 @@
 
 Scrapes VW dealer scheduling systems daily to build a time series of oil change availability.
 
-See [`SPEC.md`](./SPEC.md) for the authoritative project definition, [`CLAUDE.md`](./CLAUDE.md) for coding conventions, and [`SLICES.md`](./SLICES.md) for the build plan.
+See [`SPEC.md`](./SPEC.md) for the authoritative project definition, [`CLAUDE.md`](./CLAUDE.md) for coding conventions, and [`SLICES.md`](./SLICES.md) for the build plan. Before the daily pipeline can collect real data, the credential and live-scraper work in [`SETUP.md`](./SETUP.md) must be completed — the scheduled cron is intentionally disabled until then.
 
 ## Quick start
 

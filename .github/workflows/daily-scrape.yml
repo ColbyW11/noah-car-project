@@ -5,10 +5,13 @@ name: Daily scrape
 # degraded runs (>25% dealer failures). See scripts/ci_run.py for thresholds.
 
 on:
-  schedule:
-    # 13:00 UTC ≈ 9am ET — business hours on the US east coast so dealer
-    # schedulers are live and a zero-slot return isn't ambiguous.
-    - cron: "0 13 * * *"
+  # Scheduled cron deliberately disabled until Drive secrets are configured
+  # AND the live scrapers are repaired (see SETUP.md). With no secrets, every
+  # cron run would hard-fail in ci_run.py; with broken scrapers, even a green
+  # run would produce zero successful observations. Re-enable by uncommenting
+  # the schedule block once SETUP.md's checklist is done.
+  # schedule:
+  #   - cron: "0 13 * * *"  # 13:00 UTC ≈ 9am ET
   workflow_dispatch: {}
 
 concurrency:
