@@ -112,6 +112,137 @@ def test_xtime_handles_trailing_z_utc_timestamps() -> None:
     assert slots == [datetime(2026, 4, 20, 9, 0, tzinfo=timezone.utc)]
 
 
+def test_xtime_parses_consumer_xtime_available_times_envelope() -> None:
+    """consumer.xtime.com SPA returns a `Days[].timeslots[].time` wall-clock
+    shape with no tz offset. Caller passes dealer_tz to localize."""
+    payload = {
+        "success": "True",
+        "statusCode": "0",
+        "availableTimes": {
+            "Days": [
+                {
+                    "calendarDate": "2026-05-14",
+                    "timeslots": [
+                        {"time": "08:00:00"},
+                        {"time": "09:30:00"},
+                    ],
+                },
+                {
+                    "calendarDate": "2026-05-15",
+                    "timeslots": [{"time": "10:15:00"}],
+                },
+            ],
+        },
+    }
+    slots = parse_slots_from_payload(payload, dealer_tz="America/New_York")
+
+    from zoneinfo import ZoneInfo
+    eastern = ZoneInfo("America/New_York")
+    assert slots == [
+        datetime(2026, 5, 14, 8, 0, tzinfo=eastern),
+        datetime(2026, 5, 14, 9, 30, tzinfo=eastern),
+        datetime(2026, 5, 15, 10, 15, tzinfo=eastern),
+    ]
+
+
+def test_xtime_consumer_envelope_skips_closed_days() -> None:
+    """A Day with no timeslots (dealer closed / fully booked) is not an error
+    — just zero slots for that date."""
+    payload = {
+        "success": "True",
+        "availableTimes": {
+            "Days": [
+                {"calendarDate": "2026-05-14", "timeslots": []},
+                {
+                    "calendarDate": "2026-05-15",
+                    "timeslots": [{"time": "11:00:00"}],
+                },
+            ],
+        },
+    }
+    slots = parse_slots_from_payload(payload, dealer_tz="America/New_York")
+    assert len(slots) == 1
+
+
+def test_xtime_consumer_envelope_defaults_to_utc_when_dealer_tz_missing() -> None:
+    """If caller forgets dealer_tz, localize to UTC rather than crash. Loud
+    failures are reserved for malformed envelopes, not missing kwargs."""
+    payload = {
+        "success": "True",
+        "availableTimes": {
+            "Days": [
+                {"calendarDate": "2026-05-14", "timeslots": [{"time": "08:00:00"}]},
+            ],
+        },
+    }
+    slots = parse_slots_from_payload(payload)
+    assert slots == [datetime(2026, 5, 14, 8, 0, tzinfo=timezone.utc)]
+
+
+def test_xtime_parses_team_velocity_availabilities_envelope() -> None:
+    """TeamVelocity /Xtime/Availabilities returns `uiFormattedResponse[].timeSlots`
+    with each timeSlot as a full ISO-8601 string (offset included)."""
+    payload = {
+        "success": True,
+        "uiFormattedResponse": [
+            {
+                "calendarDate": "2026-05-14",
+                "isOpen": True,
+                "timeSlots": [
+                    "2026-05-14T08:00:00-04:00",
+                    "2026-05-14T09:30:00-04:00",
+                ],
+            },
+            {
+                "calendarDate": "2026-05-15",
+                "isOpen": True,
+                "timeSlots": ["2026-05-15T10:15:00-04:00"],
+            },
+        ],
+    }
+    slots = parse_slots_from_payload(payload)
+    assert slots == [
+        datetime.fromisoformat("2026-05-14T08:00:00-04:00"),
+        datetime.fromisoformat("2026-05-14T09:30:00-04:00"),
+        datetime.fromisoformat("2026-05-15T10:15:00-04:00"),
+    ]
+
+
+def test_xtime_team_velocity_skips_closed_days() -> None:
+    """isOpen: False days must be skipped entirely, not treated as parse errors."""
+    payload = {
+        "success": True,
+        "uiFormattedResponse": [
+            {
+                "calendarDate": "2026-05-14",
+                "isOpen": False,
+                "timeSlots": [],
+            },
+            {
+                "calendarDate": "2026-05-15",
+                "isOpen": True,
+                "timeSlots": ["2026-05-15T11:00:00-04:00"],
+            },
+        ],
+    }
+    slots = parse_slots_from_payload(payload)
+    assert len(slots) == 1
+
+
+def test_xtime_consumer_envelope_raises_on_malformed_days() -> None:
+    """`availableTimes.Days` must be a list. A dict / null / string here
+    means we're parsing the wrong endpoint and should fail loudly."""
+    payload = {
+        "success": "True",
+        "availableTimes": {"Days": "not a list"},
+    }
+    with pytest.raises(XtimeParseError) as exc:
+        parse_slots_from_payload(payload, dealer_tz="America/New_York")
+
+    assert "PARSE:" in str(exc.value)
+    assert "Days" in str(exc.value)
+
+
 def test_xtime_scraper_satisfies_protocol() -> None:
     scraper = XtimeScraper()
     assert isinstance(scraper, PlatformScraper)

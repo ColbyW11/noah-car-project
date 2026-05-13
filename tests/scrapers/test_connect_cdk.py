@@ -71,6 +71,38 @@ def test_connect_cdk_accepts_bare_list_payload() -> None:
     assert slots[0] == datetime.fromisoformat("2026-04-21T08:00:00-04:00")
 
 
+def test_connect_cdk_filters_unavailable_slots_from_available_slots_endpoint() -> None:
+    """`/Availability/AvailableSlots?cid=...` (Nanuet's live endpoint) returns
+    one row per (date, time) pair with an `isAvailable` flag. Booked slots
+    must not be reported as open."""
+    payload = [
+        {"date": "2026-05-14T08:00:00-04:00", "isAvailable": True},
+        {"date": "2026-05-14T09:00:00-04:00", "isAvailable": False},
+        {"date": "2026-05-14T10:00:00-04:00", "isAvailable": True},
+        {"date": "2026-05-14T11:00:00-04:00", "isAvailable": False},
+    ]
+    slots = parse_slots_from_payload(payload)
+
+    assert slots == [
+        datetime.fromisoformat("2026-05-14T08:00:00-04:00"),
+        datetime.fromisoformat("2026-05-14T10:00:00-04:00"),
+    ]
+
+
+def test_connect_cdk_localizes_wall_clock_slot_strings_using_dealer_tz() -> None:
+    """Bare slot strings without a tz offset must be localized to dealer_tz
+    rather than left naive (which polars / parquet would reject)."""
+    payload = {"timeSlots": ["2026-05-14T08:00:00", "2026-05-14T09:30:00"]}
+    slots = parse_slots_from_payload(payload, dealer_tz="America/New_York")
+
+    from zoneinfo import ZoneInfo
+    eastern = ZoneInfo("America/New_York")
+    assert slots == [
+        datetime(2026, 5, 14, 8, 0, tzinfo=eastern),
+        datetime(2026, 5, 14, 9, 30, tzinfo=eastern),
+    ]
+
+
 def test_connect_cdk_raises_parse_error_on_malformed_payload() -> None:
     payload = _load_json("malformed_payload/xhr_response.json")
 

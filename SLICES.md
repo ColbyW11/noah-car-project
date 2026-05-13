@@ -1,5 +1,24 @@
 # Build Plan — Vertical Slices
 
+> **Status: FROZEN as of 2026-05-13.** All 11 slices (0–10) shipped.
+> Pipeline runs daily at 9 AM via launchd, weekly health check Sun 10 AM,
+> nightly log rotation 4 AM. 3 of 5 dealers producing slot data (~402
+> slots/day). Current operational state lives in
+> [`STATUS.md`](./STATUS.md); SLICES.md is preserved as a historical
+> record of the build sequence and is not updated for ongoing work.
+>
+> **Deviations from the original plan that landed in the final product:**
+> - Slice 7 (Google Drive sync) is code-complete but credentials not
+>   configured — pipeline runs fully local. See [`SETUP.md`](./SETUP.md).
+> - Slice 9 (GitHub Actions cron) replaced by macOS launchd, since the
+>   pipeline runs on Colby's laptop only. Slack alerts replaced by
+>   macOS notification banners (`osascript`).
+> - Slice 10 (analytics notebook) replaced by `scripts/analyze.py`, which
+>   regenerates the four reports + `weekly_summary.md` after every daily
+>   run (no Jupyter dependency).
+> - VW0001 Teddy and VW0003 Piazza marked `active=false` —
+>   dealer-side issues, not technical (see STATUS.md).
+
 Each slice is one Claude Code session. Do them in order. Do not start slice N+1 until slice N is committed and tests pass.
 
 **Rule:** At the end of each slice, you should have something that works end-to-end within its scope, not a half-built layer.

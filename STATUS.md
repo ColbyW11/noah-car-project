@@ -28,10 +28,12 @@ Two launchd jobs:
 | --- | --- | --- | --- |
 | **Daily, 9 AM** | `com.colby.vw-scraper.daily` | `~/Library/LaunchAgents/com.colby.vw-scraper.daily.plist` | Runs `scripts/run_daily.py` → writes JSONL + parquet, regenerates analytics, fires a macOS notification on failure or degraded run. |
 | **Sundays, 10 AM** | `com.colby.vw-scraper.weekly` | `~/Library/LaunchAgents/com.colby.vw-scraper.weekly.plist` | Runs `scripts/health_check.py --notify`. Catches silent walker breakage that the daily notification misses — fires a banner if any active dealer had zero successes in the past 7 days. |
+| **Daily, 4 AM** | `com.colby.vw-scraper.logrotate` | `~/Library/LaunchAgents/com.colby.vw-scraper.logrotate.plist` | Runs `scripts/rotate_logs.py`. Rotates any `~/Library/Logs/vw-scraper*.log` file >5MB, keeps 4 generations. Runs between the daily and weekly jobs so it never races a live writer. |
 
-Logs:
+Logs (rotated nightly at 4 AM, see `com.colby.vw-scraper.logrotate`):
 - Daily: `~/Library/Logs/vw-scraper.{out,err}.log`
 - Weekly: `~/Library/Logs/vw-scraper-weekly.{out,err}.log`
+- Logrotate itself: `~/Library/Logs/vw-scraper-logrotate.{out,err}.log`
 
 Common operations:
 
@@ -133,6 +135,9 @@ accepts `date` as the timestamp key.
 - ✅ Weekly health check scheduled — Sunday 10 AM via the
   `com.colby.vw-scraper.weekly` launchd plist. Fires a banner if any
   active dealer was silent the past 7 days.
+- ✅ Log rotation wired — `scripts/rotate_logs.py` runs nightly at 4 AM
+  via `com.colby.vw-scraper.logrotate`. Caps each log stream at
+  ~20MB (5MB × 4 rotations).
 
 ## What's in good shape
 
