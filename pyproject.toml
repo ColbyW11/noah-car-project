@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2.10",
     "google-api-python-client>=2.154",
     "google-auth>=2.36",
+    "playwright-stealth>=2.0.3",
 ]
 
 [dependency-groups]
@@ -39,3 +40,7 @@ markers = [
 strict = true
 python_version = "3.11"
 files = ["src"]
+
+[[tool.mypy.overrides]]
+module = "playwright_stealth"
+ignore_missing_imports = true

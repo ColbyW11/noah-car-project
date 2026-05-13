@@ -21,8 +21,8 @@ import structlog
 from playwright.async_api import async_playwright
 
 from vw_scraper.models import ScrapeResult, ScrapeStatus
-from vw_scraper.registry import Platform, load_registry
-from vw_scraper.scrapers.xtime import XtimeScraper
+from vw_scraper.registry import load_registry
+from vw_scraper.scrapers import get_scraper
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REGISTRY_CSV = REPO_ROOT / "data" / "dealer_master.csv"
@@ -51,19 +51,25 @@ async def _scrape(dealer_code: str, headed: bool) -> ScrapeResult | None:
         log.error("unknown_dealer", dealer_code=dealer_code)
         return None
 
-    if dealer.platform is not Platform.XTIME:
+    try:
+        scraper = get_scraper(dealer.platform)
+    except ValueError as exc:
         log.error(
             "no_scraper_for_platform",
             dealer_code=dealer_code,
             platform=dealer.platform.value,
-            hint="Only xtime is wired in Slice 4. Slice 8 adds the platform router.",
+            error=str(exc),
         )
         return None
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=not headed)
+        browser = await pw.chromium.launch(
+            channel="chrome",
+            headless=not headed,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
         try:
-            return await XtimeScraper().scrape(dealer, browser)
+            return await scraper.scrape(dealer, browser)
         finally:
             await browser.close()
 

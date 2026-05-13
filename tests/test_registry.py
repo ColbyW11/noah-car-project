@@ -20,11 +20,11 @@ STARTER_CSV = Path(__file__).parent.parent / "data" / "dealer_master.csv"
 def test_load_registry_returns_active_dealers_from_starter_csv() -> None:
     dealers = load_registry(STARTER_CSV)
 
-    assert len(dealers) == 5
+    # VW0003 (Piazza) marked inactive on 2026-05-12: host unreachable
+    # (443 refused; parent group Akamai-bot-blocks).
     assert [d.dealer_code for d in dealers] == [
         "VW0001",
         "VW0002",
-        "VW0003",
         "VW0004",
         "VW0005",
     ]

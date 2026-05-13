@@ -124,36 +124,6 @@ def test_connect_cdk_scraper_satisfies_protocol() -> None:
     assert scraper.platform_name == Platform.CONNECT_CDK.value
 
 
-@pytest.mark.asyncio
-async def test_connect_cdk_scrape_returns_stub_error_until_live_wiring_lands() -> None:
-    """`scrape()` is a structured-error stub in Slice 8. The error message is
-    asserted here so the stub can't silently turn into a no-op; the
-    follow-up live-wiring slice is expected to delete this test."""
-    scraper = ConnectCdkScraper()
-    dealer = DealerConfig(
-        dealer_code="VW0005",
-        dealer_name="Vwnanuet",
-        dealer_url="https://vwnanuet.com",
-        schedule_url="https://www.vwnanuet.com/schedule-service.htm",
-        platform=Platform.CONNECT_CDK,
-        zip="",
-        region="",
-        config_json={},
-        active=True,
-        notes="",
-    )
-
-    result = await scraper.scrape(dealer, AsyncMock())
-
-    assert result.scrape_status is ScrapeStatus.ERROR
-    assert result.error_message is not None
-    assert result.error_message.startswith("UNEXPECTED:")
-    assert "connect_cdk" in result.error_message
-    assert result.platform is Platform.CONNECT_CDK
-    assert result.slot_count == 0
-    assert result.available_slots == []
-
-
 def test_router_returns_scraper_for_registered_platforms() -> None:
     xtime_scraper = get_scraper(Platform.XTIME)
     cdk_scraper = get_scraper(Platform.CONNECT_CDK)

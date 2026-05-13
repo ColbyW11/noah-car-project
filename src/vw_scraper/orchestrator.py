@@ -42,7 +42,7 @@ from .scrapers.base import PlatformScraper
 
 log = structlog.get_logger()
 
-_HARD_TIMEOUT_SECONDS: float = 65.0
+_HARD_TIMEOUT_SECONDS: float = 125.0
 
 
 class RunMetadata(BaseModel):
@@ -109,7 +109,17 @@ async def run_daily(
     try:
         if active_browser is None:
             playwright_ctx = await async_playwright().start()
-            active_browser = await playwright_ctx.chromium.launch(headless=not headed)
+            active_browser = await playwright_ctx.chromium.launch(
+                channel="chrome",
+                headless=not headed,
+                args=[
+                    # Hide Chrome's automation flag so SPAs that gate
+                    # render on webdriver detection still mount their
+                    # components (ConnectCDK's /select-services, Teddy
+                    # VW's Vue3 scheduler).
+                    "--disable-blink-features=AutomationControlled",
+                ],
+            )
             owned_browser = True
 
         results = await _dispatch_all(

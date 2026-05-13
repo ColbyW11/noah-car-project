@@ -1,17 +1,23 @@
 {
   "dealer_code": "VW0002",
   "root_url": "https://www.gojeffvw.com",
-  "final_url": "",
-  "schedule_url": "",
-  "platform_detected": "unknown",
+  "final_url": "https://www.gojeffvw.com/Service-Scheduler.html",
+  "schedule_url": "https://www.gojeffvw.com/Service-Scheduler.html",
+  "platform_detected": "xtime",
   "config_hints": {
     "zip_required": false,
-    "vehicle_selection_required": false,
+    "vehicle_selection_required": true,
     "login_wall": false,
-    "iframe_embedded": false
+    "iframe_embedded": true,
+    "iframe_src_pattern": "consumer.xtime.com"
   },
-  "iframe_srcs": [],
-  "fetched_at_utc": "2026-04-20T03:51:59.179970+00:00",
+  "iframe_srcs": [
+    "https://consumer.xtime.com/scheduling/?webKey=vw20120702001037406497&amp%3BVARIANT=VOLKSWAGENUSA&amp%3BPROVIDER=VW_SHIFT&amp%3Bextctxt=VW_SHIFT&amp%3BKEYWORD=VW_SHIFT&amp%3Bextid=VW_SHIFT&PROVIDER=VW_SHIFT&extctxt=VW_SHIFT&KEYWORD=VW_SHIFT&extid=VW_SHIFT",
+    "https://dai.autoleadstar.com/?2026-05-12T20:47:36.863Z&css_file_name=00b1eb-d8dcdd-ffffff",
+    "https://volkswagenamerica.demdex.net/dest5.html?d_nsid=0#https%3A%2F%2Fwww.gojeffvw.com"
+  ],
+  "fetched_at_utc": "2026-05-12T20:47:44.543122+00:00",
   "user_agent": "vw-oil-availability-scraper/0.1.0 (+mailto:colby.warzecha@gmail.com; research; non-commercial)",
-  "error": "NAVIGATION: robots.txt disallows root URL"
+  "error": null,
+  "http_status": 200
 }
