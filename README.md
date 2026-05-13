@@ -1,75 +1,73 @@
 # VW Oil Change Availability Tracker
 
-Scrapes VW dealer scheduling systems daily to build a time series of oil change availability.
+Scrapes VW dealer scheduling systems daily to build a time series of
+oil-change availability. The pilot tracks 3 dealers in the NY/PA
+metro area (Jeff D'Ambrosio, VW of West Islip, VW of Nanuet) and
+captures ~400 timeslots per daily run.
 
-See [`SPEC.md`](./SPEC.md) for the authoritative project definition, [`CLAUDE.md`](./CLAUDE.md) for coding conventions, and [`SLICES.md`](./SLICES.md) for the build plan. Before the daily pipeline can collect real data, the credential and live-scraper work in [`SETUP.md`](./SETUP.md) must be completed — the scheduled cron is intentionally disabled until then.
+**Start here for current state**: [`STATUS.md`](./STATUS.md) — which
+dealers are working, what's pending, how the scheduled job is wired,
+how to run anything manually.
+
+Other reference docs:
+- [`SPEC.md`](./SPEC.md) — authoritative project definition + data model
+- [`CLAUDE.md`](./CLAUDE.md) — coding conventions
+- [`SLICES.md`](./SLICES.md) — historical build plan (slices 0–10, all
+  completed)
+- [`SETUP.md`](./SETUP.md) — _optional_ Google Drive / GitHub Actions
+  setup (not required for the local pipeline)
 
 ## Quick start
 
 ```bash
-# Prereqs: Python 3.11+, uv (https://github.com/astral-sh/uv)
+# Prereqs: Python 3.11+, uv (https://github.com/astral-sh/uv),
+# Google Chrome installed (Playwright uses it via channel="chrome")
 
-# Install dependencies
 uv sync
-uv run playwright install chromium
+uv run playwright install chromium firefox webkit  # webkit/firefox optional
+uv run pytest                                      # confirm tests pass
 
-# Configure (copy and edit)
-cp .env.example .env
-
-# Run tests
-uv run pytest
-
-# Scrape a single dealer (after Slice 4)
-uv run python scripts/scrape_one.py VW0001
-
-# Run the full daily pipeline (after Slice 5)
+# One-off: scrape every active dealer and write data/raw + parquet + report.
 uv run python scripts/run_daily.py
+
+# Single dealer to stdout (useful for debugging).
+uv run python scripts/scrape_one.py VW0002
+
+# Generate the weekly report on demand.
+uv run python scripts/analyze.py
+
+# Per-dealer success rate over the last 7 days.
+uv run python scripts/health_check.py
 ```
 
-## Required secrets
+## Scheduled runs (macOS launchd)
 
-Stored outside the repo:
+Two jobs run on your laptop unattended. Full operational details live
+in [`STATUS.md`](./STATUS.md#how-it-runs).
 
-- `VW_SCRAPER_SA_PATH` — path to Google Drive service account JSON (e.g. `~/.config/vw-scraper/service_account.json`).
-- `VW_SCRAPER_DRIVE_FOLDER_ID` — the ID of the root Drive folder for outputs.
-- `VW_SCRAPER_SLACK_WEBHOOK` — optional, for failure alerts.
+| When | Job | What it does |
+| --- | --- | --- |
+| Daily 9 AM | `com.colby.vw-scraper.daily` | Scrape → JSONL + parquet → regenerate report. macOS notification on failure. |
+| Sunday 10 AM | `com.colby.vw-scraper.weekly` | Health check — banner if any active dealer was silent the past 7 days. |
 
-## Scheduled runs (GitHub Actions)
+Plists are in `~/Library/LaunchAgents/`; logs in `~/Library/Logs/`.
 
-The `daily-scrape` workflow (`.github/workflows/daily-scrape.yml`) runs the
-full pipeline — scrape, Drive sync, alert — daily at **13:00 UTC (≈ 9am ET)**
-and on manual dispatch.
+## What lands each run
 
-### Required repo secrets
-
-Set these in *Settings → Secrets and variables → Actions*:
-
-- `GCP_SERVICE_ACCOUNT_JSON` — the full JSON body of the Drive service account
-  key (paste it in as-is, including newlines).
-- `VW_SCRAPER_DRIVE_FOLDER_ID` — same ID used locally.
-- `VW_SCRAPER_SLACK_WEBHOOK` — incoming-webhook URL for a Slack channel. If
-  absent, the pipeline runs fine but no alerts are sent.
-
-### Manual dispatch
-
-```bash
-gh workflow run daily-scrape.yml
-gh run watch
 ```
-
-Or use the *Actions* tab → *Daily scrape* → *Run workflow*.
-
-### Alert thresholds
-
-- **100% dealer failure** → Slack `:rotating_light:` (error), workflow exit 2.
-- **>25% dealer failure** → Slack `:warning:` (warning), workflow exit 0.
-- **Run-level exception** (scrape or Drive sync raises) → Slack error.
-- **Infrastructure failure** (checkout / setup / Playwright install) → Slack
-  error from a trailing `if: failure()` step.
-
-## Drive folder layout
-
-See the Storage Layout section of [`SPEC.md`](./SPEC.md).
+data/
+  raw/YYYY-MM-DD/
+    observations.jsonl       # one line per dealer (success or error)
+    run_metadata.json        # run summary (counts, version, duration)
+  processed/
+    timeseries.parquet       # append-only successful observations
+  reports/                   # regenerated after each daily run
+    weekly_summary.md
+    lead_time_trend.png
+    next_day_rate.png
+    dealer_friction.png
+    availability_heatmap.png
+```
 
 ## Project structure
 
@@ -77,40 +75,56 @@ See the Storage Layout section of [`SPEC.md`](./SPEC.md).
 src/vw_scraper/
   registry.py           # Load dealer_master.csv
   platform_detect.py    # Identify scheduling platform
+  http.py               # Identifying UA + RobotsCache
   models.py             # ScrapeResult, DealerConfig, etc.
-  orchestrator.py       # Daily run loop
+  orchestrator.py       # Daily run loop (concurrency, atomic writes)
   scrapers/
     base.py             # PlatformScraper protocol
-    xtime.py            # Xtime scraper
-    connect_cdk.py      # ConnectCDK scraper
-    mykaarma.py         # myKaarma scraper (later)
+    xtime.py            # Xtime scraper (consumer.xtime + TeamVelocity variants)
+    connect_cdk.py      # ConnectCDK scraper (api.connectcdk.com)
   storage/
-    timeseries.py       # Parquet append logic
-    drive.py            # Google Drive sync
-  alerts.py             # Slack notifications
-tests/
-  fixtures/             # HTML snapshots for regression tests
+    timeseries.py       # Parquet append (idempotent on observation_date)
+    drive.py            # Google Drive sync (optional — see SETUP.md)
+  alerts.py             # Slack alerts (optional)
 scripts/
-  scrape_one.py         # CLI: scrape one dealer
-  run_daily.py          # CLI: full daily run
-  ci_run.py             # CLI: scrape + Drive sync + alerts (used by CI)
-  sync_drive.py         # CLI: standalone Drive sync
-notebooks/
-  analysis.ipynb        # Answers the three core metrics
-data/                   # Local outputs — not committed
-  raw/YYYY-MM-DD/observations.jsonl
-  processed/timeseries.parquet
+  run_daily.py          # CLI: full daily run + parquet + report
+  scrape_one.py         # CLI: single dealer scrape
+  analyze.py            # CLI: regenerate weekly report
+  health_check.py       # CLI: per-dealer success rate
+  discover_platforms.py # CLI: identify platform for new dealers
+  diagnostics/          # Probes for debugging walker breakage
+data/                   # Local outputs (git-ignored)
+tests/
+  fixtures/             # HTML snapshots for parser regression tests
 ```
 
 ## The three metrics
 
-1. **Network average lead time** — mean hours from observation to first available oil change slot.
-2. **Next-day appointment rate** — % of dealers with first slot within 48 hours of observation.
-3. **Scheduling flow seconds** — wall-clock time from landing on the scheduling page to seeing slots. Measures user-facing friction.
+From the analytics report (`data/reports/weekly_summary.md`):
+
+1. **Network average lead time** — mean hours from observation to first
+   available oil-change slot.
+2. **Next-day appointment rate** — % of dealers with first slot ≤ 48
+   hours of observation.
+3. **Scheduling flow seconds** — wall-clock time from page-load to slot
+   list visible. Per-dealer friction ranking for the eventual
+   "fastest oil change near me" product.
 
 ## Operational principles
 
-- **Loud failures, never silent drift.** A scraper that can't find slots errors out; it does not return an empty list.
-- **Raw data is sacred.** Full slot lists are always persisted. Aggregates are recomputable.
-- **Failure isolation.** One broken dealer never kills the run.
-- **Read-only.** Never book an appointment. Never submit personal information.
+- **Loud failures, never silent drift.** A scraper that can't find
+  slots errors out with a structured prefix (`TIMEOUT:` / `PARSE:` /
+  `NAVIGATION:` / `UNEXPECTED:`); it never returns an empty list.
+- **Raw data is sacred.** Full slot lists are persisted in
+  `observations.jsonl`. The parquet is a flattened derived view;
+  aggregates are recomputable from the raw layer.
+- **Failure isolation.** One broken dealer never kills the run —
+  per-dealer timeouts and exception isolation keep the rest going.
+- **Read-only.** The walker submits dummy data only where required to
+  reach availability (per SPEC.md §144). It never books an appointment
+  and never submits real personal information.
+- **Identifiable but Mozilla-compatible UA.** Pure product-token UAs
+  triggered Xtime to serve a degraded SPA bundle that never finished
+  rendering. The UA now follows the Bingbot/Yandexbot pattern
+  (`Mozilla/... (compatible; vw-oil-availability-scraper; +mailto:...)`)
+  so dealers can still identify the scraper in their access logs.
