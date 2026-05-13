@@ -20,10 +20,13 @@ STARTER_CSV = Path(__file__).parent.parent / "data" / "dealer_master.csv"
 def test_load_registry_returns_active_dealers_from_starter_csv() -> None:
     dealers = load_registry(STARTER_CSV)
 
-    # VW0003 (Piazza) marked inactive on 2026-05-12: host unreachable
-    # (443 refused; parent group Akamai-bot-blocks).
+    # Inactive dealers (kept in registry for documentation, filtered out
+    # by `load_registry` which only returns `active=true` rows):
+    #   - VW0001 Teddy: dealer has online scheduling disabled
+    #     (`enableScheduleServiceButtons = 'false'` in their HTML).
+    #   - VW0003 Piazza: host unreachable (443 refused; parent group
+    #     Akamai-bot-blocks).
     assert [d.dealer_code for d in dealers] == [
-        "VW0001",
         "VW0002",
         "VW0004",
         "VW0005",
