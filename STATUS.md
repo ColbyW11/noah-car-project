@@ -1,4 +1,4 @@
-# Project Status — 2026-05-13
+# Project Status — 2026-05-13 (3 of 3 active dealers working)
 
 ## Where the data lives
 
@@ -50,10 +50,10 @@ uv run python scripts/run_daily.py --skip-timeseries  # raw JSONL only
 | Code   | Dealer             | Status              | Slots/day | Notes                                                                                                                            |
 | ------ | ------------------ | ------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | VW0001 | Teddy VW           | **inactive**        | —         | Dealer disabled online scheduling on their site (`enableScheduleServiceButtons = false`). Phone-only via (718) 920-1400.         |
-| VW0002 | Jeff D'Ambrosio VW | ✅ **working**      | ~135      | consumer.xtime.com modern SPA, webKey `vw20120702001037406497`.                                                                  |
+| VW0002 | Jeff D'Ambrosio VW | ✅ **working**      | ~117      | consumer.xtime.com modern SPA, webKey `vw20120702001037406497`.                                                                  |
 | VW0003 | Piazza VW          | **inactive**        | —         | Host unreachable (port 443 ECONNREFUSED). Redirect target `piazzaautogroup.com` is Akamai-bot-blocked. Possibly defunct dealer.  |
-| VW0004 | VW of West Islip   | ✅ **working**      | ~215      | TeamVelocity inline form on dealer.com, `xtime.teamvelocityportal.com` backend.                                                  |
-| VW0005 | VW of Nanuet       | ⚠️ headless-blocked | 0         | ConnectCDK live nav reaches 8 of ~12 steps, then the React `/select-services` page never mounts in headless. Works headed only.  |
+| VW0004 | VW of West Islip   | ✅ **working**      | ~197      | TeamVelocity inline form on dealer.com, `xtime.teamvelocityportal.com` backend.                                                  |
+| VW0005 | VW of Nanuet       | ✅ **working**      | ~88       | ConnectCDK 5-step wizard via `api.connectcdk.com` iframe + transport-modal dialog. Slots from `/Availability/AvailableSlots`.    |
 
 ## Fixing the missing dealers
 
@@ -72,56 +72,40 @@ has migrated or shut down. **Action**: verify whether the dealership is
 still operating; if so, find their new schedule URL (possibly on the
 parent `piazzaautogroup.com` group site).
 
-**VW0005 Nanuet (ConnectCDK)** — The vehicle picker works in headless
-(Make/Year/Model/mileage commit via React-aware native value setter,
-URL advances to `/select-services`), but the services page never mounts
-its tiles. Tried in this order, none succeeded:
-
-1. `playwright-stealth` fingerprint patches (webdriver, plugins,
-   chrome.runtime, sec-ch-ua, WebGL, etc.).
-2. Real Chrome via `channel="chrome"` (not bundled Chromium).
-3. `--disable-blink-features=AutomationControlled` launch flag.
-4. Firefox via `pw.firefox.launch`.
-5. WebKit via `pw.webkit.launch`.
-6. `launch_persistent_context` with a temporary user-data dir.
-
-ConnectCDK's `/select-services` bundle does a profile check we can't
-slip past in headless. **Action**: run `uv run python
-scripts/run_daily.py --headed` from an interactive macOS session — the
-existing scraper should complete the flow with a visible browser. If
-yes, we add a small `--headed-only-platforms=connect_cdk` knob to the
-orchestrator so the daily cron can run mixed-mode (headless for Xtime,
-headed for CDK).
+**VW0005 Nanuet (ConnectCDK)** — Resolved. Walker drives the full
+5-step wizard: NEW CUSTOMER → vehicle picker (Make/Year/Model/mileage
+via React-aware native value setter) → catalog "Oil And Filter -
+Change" with disclaimer modal confirm → page-NEXT opens transport
+modal → pick "I will drop off my vehicle" radio →
+`transportation-dialog-next-button` advances to time page → CDK fires
+`/Availability/AvailableSlots?cid=2001816` with a list of `{date,
+isAvailable}` slots. Parser now filters `isAvailable: false` and
+accepts `date` as the timestamp key.
 
 ## Action items, ranked
 
-1. **(medium)** Try VW0005 Nanuet in headed mode — `uv run python
-   scripts/scrape_one.py VW0005 --headed` from an active desktop
-   session. If the services page renders, file a small change to mark
-   CDK as headed-only and the launchd job will pick it up. Otherwise
-   mark `active=false` like VW0001.
-2. **(medium)** Verify VW0003 Piazza dealer status — phone the
+1. **(easy)** Verify VW0003 Piazza dealer status — phone the
    dealership at `(610) 896-4853`. If the dealership is operating from
    a new web address, update the registry.
-3. **(low, do once 7+ days of data exist)** Build the analytics
+2. **(low, do once 7+ days of data exist)** Build the analytics
    notebook (Slice 10): network-average lead time, next-day appointment
    rate, scheduling flow seconds heatmap. Code skeleton already in
    `notebooks/` placeholder.
-4. **(deferred until scale matters)** Google Drive credentials and the
+3. **(deferred until scale matters)** Google Drive credentials and the
    GitHub Actions cron — see `SETUP.md` §A. Not blocking anything; just
    means the data lives only on this machine for now.
 
 ### Done
 
+- ✅ All three active dealers producing slot data (~402 slots/day total).
 - ✅ Wired `append_to_timeseries` into `run_daily.py` — every run also
   updates `data/processed/timeseries.parquet`.
 - ✅ Scheduled via launchd at 9 AM daily (plist in `~/Library/LaunchAgents/`).
 - ✅ macOS notification on degraded or failed runs — silent on full
   success, banner with sound when `success_count < dealers_attempted`.
   Suppress with `--no-notify` for manual debugging.
-- ✅ ConnectCDK walker extended for the free-text "Appointment Reason"
-  service variant — reaches 11 of ~13 steps for VW0005 Nanuet in
-  headed mode. Time-page date selectors still need mapping.
+- ✅ ConnectCDK walker fully wired: catalog + disclaimer modal +
+  transport modal + slot XHR parser.
 
 ## What's in good shape
 

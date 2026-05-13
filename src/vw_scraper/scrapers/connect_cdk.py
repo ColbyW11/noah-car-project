@@ -69,6 +69,7 @@ _SLOT_TIME_KEYS = (
     "slotStart",
     "startTime",
     "dateTime",
+    "date",     # CDK /Availability/AvailableSlots envelope
     "time",
 )
 
@@ -112,6 +113,11 @@ def parse_slots_from_payload(
                 f"PARSE: items[{index}] is not a dict or string "
                 f"(got {type(item).__name__})"
             )
+        # CDK's /Availability/AvailableSlots returns one row per
+        # (date, time) pair, each with an `isAvailable` flag. Skip
+        # the unavailable ones so we don't report booked slots as open.
+        if item.get("isAvailable") is False:
+            continue
         ts_str = _first_present_string(item, _SLOT_TIME_KEYS)
         if ts_str is None:
             raise ConnectCdkParseError(
@@ -506,31 +512,101 @@ async def _walk_connect_cdk(
     await _try_click(frame, "#next-button", "next: vehicle → services", state, bound_log)
     await asyncio.sleep(3.0)
 
-    # Step 2: Service selection. ConnectCDK dealers configure this two
-    # ways:
-    #   (a) Preset service tiles with checkboxes — pick Oil Change.
-    #   (b) Free-text "Appointment Reason" textarea + ADD SERVICE button —
-    #       dealer skips the curated catalog entirely. VW0005 Nanuet
-    #       runs this variant.
-    # Try the tile variant first; fall back to the free-text variant.
+    # Step 2: Service selection. ConnectCDK dealers configure this in
+    # multiple ways:
+    #   (a) Catalog tiles, each with an `h4.services-productheading`
+    #       label and an adjacent ADD SERVICE button. Nanuet uses this
+    #       — services shown include "Oil And Filter - Change",
+    #       "Tire(S) - Rotate", "BG Brake Fluid Flush", etc.
+    #   (b) Plain tile/checkbox lists with text labels (other dealers).
+    #   (c) Free-text "Appointment Reason" textarea + a unique
+    #       `Common.AddService-btn` ID. Used as fallback. Note: on some
+    #       dealers picking a catalog service triggers a transport
+    #       question on the same page that gates NEXT; the free-text
+    #       path skips that and goes straight to the time step.
+    # Try (a) first via a JS-evaluate that finds the catalog tile by
+    # heading text, walks up to the card container, and clicks its
+    # ADD SERVICE button.
     tile_clicked = False
-    for label, selector in (
-        ("service oil change tile", "[class*='service']:has-text('Oil Change')"),
-        ("service oil change li", "li:has-text('Oil Change')"),
-        ("service oil change card", "div[class*='card']:has-text('Oil Change')"),
-        ("service oil change checkbox", "label:has-text('Oil Change')"),
-        ("service oil filter tile", "[class*='service']:has-text('Oil & Filter')"),
-        ("service engine oil tile", "[class*='service']:has-text('Engine oil')"),
-    ):
-        if await _try_click(frame, selector, label, state, bound_log):
+    try:
+        clicked_label = await frame.evaluate(
+            """
+            () => {
+              const wanted = ['oil and filter', 'oil & filter', 'engine oil', 'oil change'];
+              const headings = Array.from(document.querySelectorAll('h4.services-productheading, h4[class*="service"]'))
+                .filter(h => h.offsetParent !== null);
+              for (const h of headings) {
+                const txt = (h.innerText || '').toLowerCase();
+                if (wanted.some(w => txt.includes(w))) {
+                  // Walk up to a card-like container, then find the
+                  // adjacent ADD SERVICE button.
+                  let container = h;
+                  for (let i = 0; i < 8 && container; i++) {
+                    const btn = container.querySelector ?
+                      container.querySelector('button.services-addbtn, .services-addbtn') : null;
+                    if (btn) { btn.click(); return h.innerText.trim(); }
+                    container = container.parentElement;
+                  }
+                }
+              }
+              return null;
+            }
+            """
+        )
+        if clicked_label:
+            state.interaction_steps += 1
+            bound_log.debug("step_click", label=f"catalog service: {clicked_label[:60]}")
             tile_clicked = True
-            await asyncio.sleep(2.0)
-            break
+            await asyncio.sleep(2.5)
+            # Catalog ADD SERVICE opens a disclaimer dialog with its own
+            # footer ADD SERVICE button (`Common.AddService-btn`). Until
+            # that's confirmed, the dialog backdrop intercepts clicks
+            # on the page-level NEXT.
+            try:
+                confirmed = await frame.evaluate(
+                    """
+                    () => {
+                      const btn = document.getElementById('Common.AddService-btn');
+                      if (btn && btn.offsetParent !== null) {
+                        btn.click();
+                        return true;
+                      }
+                      return false;
+                    }
+                    """
+                )
+                if confirmed:
+                    state.interaction_steps += 1
+                    bound_log.debug("step_click", label="confirm service dialog")
+                    await asyncio.sleep(2.5)
+            except (PlaywrightTimeoutError, PlaywrightError) as exc:
+                bound_log.debug("service_dialog_confirm_failed", err=str(exc)[:120])
+    except (PlaywrightTimeoutError, PlaywrightError) as exc:
+        bound_log.debug("catalog_service_click_failed", err=str(exc)[:120])
+
+    # (b) Fall back to plain tile/checkbox patterns for non-Nanuet dealers.
+    if not tile_clicked:
+        for label, selector in (
+            ("service oil change tile", "[class*='service']:has-text('Oil Change')"),
+            ("service oil change li", "li:has-text('Oil Change')"),
+            ("service oil change card", "div[class*='card']:has-text('Oil Change')"),
+            ("service oil change checkbox", "label:has-text('Oil Change')"),
+            ("service oil filter tile", "[class*='service']:has-text('Oil & Filter')"),
+            ("service engine oil tile", "[class*='service']:has-text('Engine oil')"),
+        ):
+            if await _try_click(frame, selector, label, state, bound_log):
+                tile_clicked = True
+                await asyncio.sleep(2.0)
+                break
 
     if not tile_clicked:
         # Free-text variant: a textarea labeled "Appointment Reason"
-        # (max 200 chars) + an ADD SERVICE button that commits the
-        # service to the appointment.
+        # (max 200 chars) + a SPECIFIC `Common.AddService-btn` that
+        # commits the typed reason as a service to the appointment.
+        # Caution: the page also has ~15 ADD SERVICE buttons (one per
+        # service catalog tile); picking the wrong one adds an
+        # unrelated service. `Common.AddService-btn` is the unique ID
+        # for the free-text variant.
         try:
             textarea = frame.locator(
                 "textarea, [contenteditable='true'], input[placeholder*='reason' i]"
@@ -543,59 +619,70 @@ async def _walk_connect_cdk(
             await asyncio.sleep(0.8)
         except (PlaywrightTimeoutError, PlaywrightError) as exc:
             bound_log.debug("appointment_reason_not_found", err=str(exc)[:120])
-        # Click ADD SERVICE. The button text is uppercased via CSS but
-        # Playwright's `:has-text` matches case-insensitively. We try
-        # several DOM shapes (Material-styled label inside button,
-        # role=button div) plus a JS-evaluate fallback that walks the
-        # DOM tree directly.
-        add_service_clicked = False
+        # Click the specific Common.AddService button for the free-text
+        # entry. The CSS selector `#Common.AddService-btn` parses
+        # incorrectly (id=Common + class=AddService-btn), so we use a
+        # JS-evaluate via getElementById which handles dotted IDs.
+        # Fall back to attribute selector if needed.
         for label, selector in (
-            ("add service button", "button:has-text('Add Service')"),
-            ("add service generic", "[role='button']:has-text('Add Service')"),
-            ("add service text", "text=Add Service"),
-            ("add service mdc", "button.mdc-button:has-text('Add')"),
+            ("add service (free-text attr)", "[id='Common.AddService-btn']"),
         ):
             if await _try_click(frame, selector, label, state, bound_log):
-                add_service_clicked = True
                 await asyncio.sleep(2.0)
                 break
-        if not add_service_clicked:
-            # JS fallback: find ANY clickable element with "ADD SERVICE"
-            # text and dispatch a click. The selector engine sometimes
-            # misses Material spans/labels that visually render as
-            # buttons but aren't `<button>` themselves.
+        else:
+            # JS fallback using getElementById which is safe for IDs
+            # with dots. Also clicks the button if it exists.
             try:
                 clicked = await frame.evaluate(
                     """
                     () => {
-                      const candidates = Array.from(
-                        document.querySelectorAll('button, [role=button], a, span.mdc-button__label')
-                      ).filter(el =>
-                        el.offsetParent !== null &&
-                        (el.innerText || '').trim().toUpperCase().startsWith('ADD SERVICE')
-                      );
-                      if (!candidates.length) return false;
-                      // Walk up to the actual button container if we
-                      // matched the inner label span.
-                      let target = candidates[0];
-                      if (target.tagName === 'SPAN' && target.closest('button')) {
-                        target = target.closest('button');
-                      }
-                      target.click();
-                      return true;
+                      const btn = document.getElementById('Common.AddService-btn');
+                      if (btn) { btn.click(); return true; }
+                      return false;
                     }
                     """
                 )
                 if clicked:
                     state.interaction_steps += 1
-                    bound_log.debug("step_click", label="add service (js fallback)")
-                    add_service_clicked = True
+                    bound_log.debug("step_click", label="add service (js-by-id)")
                     await asyncio.sleep(2.0)
+                else:
+                    bound_log.debug("add_service_btn_not_found_in_dom")
             except (PlaywrightTimeoutError, PlaywrightError) as exc:
-                bound_log.debug("add_service_js_fallback_failed", err=str(exc)[:120])
+                bound_log.debug("add_service_js_by_id_failed", err=str(exc)[:120])
 
-    # Continue to Time step.
-    await _try_click(frame, "#next-button", "next: services → time", state, bound_log)
+    # Step 2.5: Click the page-level NEXT to advance from service-add
+    # to the transportation modal. (Same `#next-button`, but the click
+    # now opens a transport dialog because a service was just added.)
+    await _try_click(frame, "#next-button", "open transport dialog", state, bound_log)
+    await asyncio.sleep(3.0)
+
+    # Pick a transport option in the modal. CDK renders the options as
+    # `<input type="radio" id="transportTypesSliceOne-N">` with labels
+    # ("I will drop off my vehicle", etc.). Clicking the label is the
+    # reliable way to set the radio because the underlying input has
+    # `class="mdc-radio__native-control"` and is hidden behind the
+    # custom MDC radio visual.
+    for label, selector in (
+        ("transport: drop off label", "label[for='transportTypesSliceOne-0']"),
+        ("transport: drop off span", "span:has-text('I will drop off my vehicle')"),
+        ("transport: first radio label", "label[for^='transportTypesSliceOne']"),
+    ):
+        if await _try_click(frame, selector, label, state, bound_log):
+            await asyncio.sleep(1.5)
+            break
+
+    # Click the dialog's NEXT (separate from `#next-button`). The
+    # `data-testid="transportation-dialog-next-button"` selector pins
+    # it precisely.
+    await _try_click(
+        frame,
+        "button[data-testid='transportation-dialog-next-button']",
+        "next: transport dialog → time",
+        state,
+        bound_log,
+    )
     await asyncio.sleep(4.0)
 
     # Step 3: Time/date picker. Pick the first available date — slot XHR
