@@ -138,6 +138,29 @@ def main(argv: list[str] | None = None) -> int:
             log.error("timeseries_append_failed", error=str(exc))
             # Don't fail the whole run — the raw JSONL is already on disk.
 
+        # Regenerate the analytics report so `data/reports/` is always
+        # current with the latest observation. ~1s of overhead. Failure
+        # here is logged but doesn't fail the run.
+        analyze_script = Path(__file__).parent / "analyze.py"
+        if analyze_script.exists():
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(analyze_script)],
+                    timeout=30,
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    log.info("analytics_report_regenerated")
+                else:
+                    log.warning(
+                        "analytics_report_nonzero_exit",
+                        rc=result.returncode,
+                        stderr=result.stderr[:200],
+                    )
+            except Exception as exc:  # noqa: BLE001
+                log.warning("analytics_report_failed", error=str(exc))
+
     # JSON summary to stdout so it can be piped into jq.
     print(metadata.model_dump_json(indent=2))
 

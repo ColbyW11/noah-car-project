@@ -19,6 +19,7 @@ silent. Run weekly via launchd or just before reviewing the data.
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -51,6 +52,12 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=7,
         help="Number of days to look back (default: 7).",
+    )
+    parser.add_argument(
+        "--notify",
+        action="store_true",
+        help="Fire a macOS notification banner if any dealer is silent. "
+        "Default off; set this for scheduled (cron / launchd) runs.",
     )
     args = parser.parse_args(argv)
 
@@ -114,17 +121,42 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if silent_dealers:
-        print()
-        print(
-            f"FAILED: {len(silent_dealers)} dealer(s) had zero successes "
+        msg = (
+            f"{len(silent_dealers)} dealer(s) had zero successes "
             f"in the last {args.window_days} days: {', '.join(silent_dealers)}"
         )
+        print()
+        print(f"FAILED: {msg}")
+        if args.notify:
+            _notify_failure(
+                f"VW scraper health check failed",
+                msg[:200],
+            )
         return 1
 
     print()
     print(f"OK: all {len(active_dealers)} active dealers produced at least "
           "one observation.")
     return 0
+
+
+def _notify_failure(title: str, msg: str) -> None:
+    """Fire a macOS banner via osascript. Failures swallowed."""
+    script = (
+        f'display notification "{msg}" '
+        f'with title "{title}" '
+        f'sound name "Submarine"'
+    )
+    try:
+        subprocess.run(
+            ["osascript", "-e", script],
+            check=False,
+            timeout=5,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 if __name__ == "__main__":

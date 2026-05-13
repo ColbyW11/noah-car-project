@@ -22,15 +22,26 @@ configured yet, so syncing to Drive is a no-op until those are set up.
 
 ## How it runs
 
-Scheduled via macOS launchd at **9:00 AM local time daily**:
+Two launchd jobs:
 
-- Plist: `~/Library/LaunchAgents/com.colby.vw-scraper.daily.plist`
-- Logs: `~/Library/Logs/vw-scraper.out.log` (JSON summary) and
-  `~/Library/Logs/vw-scraper.err.log` (structlog progress + errors).
-- Status: `launchctl print gui/$UID/com.colby.vw-scraper.daily`
-- Manual fire (run now): `launchctl kickstart -k gui/$UID/com.colby.vw-scraper.daily`
-- Unload (stop scheduling): `launchctl bootout gui/$UID/com.colby.vw-scraper.daily`
-- Reload after editing plist: `launchctl bootout gui/$UID/...; launchctl bootstrap gui/$UID/<path>`
+| When | Job | Plist | What it does |
+| --- | --- | --- | --- |
+| **Daily, 9 AM** | `com.colby.vw-scraper.daily` | `~/Library/LaunchAgents/com.colby.vw-scraper.daily.plist` | Runs `scripts/run_daily.py` → writes JSONL + parquet, regenerates analytics, fires a macOS notification on failure or degraded run. |
+| **Sundays, 10 AM** | `com.colby.vw-scraper.weekly` | `~/Library/LaunchAgents/com.colby.vw-scraper.weekly.plist` | Runs `scripts/health_check.py --notify`. Catches silent walker breakage that the daily notification misses — fires a banner if any active dealer had zero successes in the past 7 days. |
+
+Logs:
+- Daily: `~/Library/Logs/vw-scraper.{out,err}.log`
+- Weekly: `~/Library/Logs/vw-scraper-weekly.{out,err}.log`
+
+Common operations:
+
+```bash
+launchctl list | grep vw-scraper                                    # which jobs are loaded
+launchctl print gui/$UID/com.colby.vw-scraper.daily                 # status + next fire time
+launchctl kickstart -k gui/$UID/com.colby.vw-scraper.daily          # run the daily job NOW
+launchctl bootout gui/$UID/com.colby.vw-scraper.daily               # stop scheduling
+launchctl bootstrap gui/$UID/ ~/Library/LaunchAgents/<plist>        # (re)load a plist
+```
 
 If the laptop is asleep at 9 AM, launchd fires the job at next wake.
 Network failures, dealer-side outages, etc. don't break the schedule —
@@ -116,6 +127,12 @@ accepts `date` as the timestamp key.
   onboarding new dealers.
 - ✅ `SETUP.md` trimmed — now only documents the optional Drive
   credentials; pipeline-state lives in this file.
+- ✅ `analyze.py` runs at the end of every daily run, so
+  `data/reports/` always reflects the latest observation (no manual
+  step needed).
+- ✅ Weekly health check scheduled — Sunday 10 AM via the
+  `com.colby.vw-scraper.weekly` launchd plist. Fires a banner if any
+  active dealer was silent the past 7 days.
 
 ## What's in good shape
 
