@@ -2,24 +2,47 @@
 
 ## Where the data lives
 
-Each daily run writes to `data/raw/<YYYY-MM-DD>/`:
+Each daily run writes to two places:
 
-- `observations.jsonl` — one JSON line per dealer scrape (success or
-  structured error), schema in [`SPEC.md`](SPEC.md). Atomic write +
-  idempotent re-run replaces the date's partition.
-- `run_metadata.json` — run-level summary (start/end time, success and
-  error counts, scraper version).
+- **Raw, per-day**: `data/raw/<YYYY-MM-DD>/`
+  - `observations.jsonl` — one JSON line per dealer scrape (success or
+    structured error), schema in [`SPEC.md`](SPEC.md). Atomic write +
+    idempotent re-run replaces the date's partition.
+  - `run_metadata.json` — run-level summary (start/end time, success and
+    error counts, scraper version).
+- **Processed, append-only**: `data/processed/timeseries.parquet`
+  — every successful observation across all dates, flattened (no
+  per-slot detail; that lives in the raw JSONL). Same-day re-runs
+  replace that date's rows, never duplicate.
 
-Currently local only. Google Drive sync is plumbed
+Both paths are local-only. Google Drive sync is plumbed
 (`src/vw_scraper/storage/drive.py`, `scripts/sync_drive.py`) but the
 service-account credentials in [`SETUP.md`](SETUP.md) §A have not been
 configured yet, so syncing to Drive is a no-op until those are set up.
 
-To run the pipeline:
+## How it runs
+
+Scheduled via macOS launchd at **9:00 AM local time daily**:
+
+- Plist: `~/Library/LaunchAgents/com.colby.vw-scraper.daily.plist`
+- Logs: `~/Library/Logs/vw-scraper.out.log` (JSON summary) and
+  `~/Library/Logs/vw-scraper.err.log` (structlog progress + errors).
+- Status: `launchctl print gui/$UID/com.colby.vw-scraper.daily`
+- Manual fire (run now): `launchctl kickstart -k gui/$UID/com.colby.vw-scraper.daily`
+- Unload (stop scheduling): `launchctl bootout gui/$UID/com.colby.vw-scraper.daily`
+- Reload after editing plist: `launchctl bootout gui/$UID/...; launchctl bootstrap gui/$UID/<path>`
+
+If the laptop is asleep at 9 AM, launchd fires the job at next wake.
+Network failures, dealer-side outages, etc. don't break the schedule —
+the next day's run is independent.
+
+## Running manually
 
 ```bash
-uv run python scripts/run_daily.py            # data/raw/<today>/
-uv run python scripts/scrape_one.py VW0002    # single dealer to stdout
+uv run python scripts/run_daily.py            # all active dealers → data/raw + data/processed
+uv run python scripts/scrape_one.py VW0002    # single dealer → stdout
+uv run python scripts/run_daily.py --headed   # show the browser (debug only)
+uv run python scripts/run_daily.py --skip-timeseries  # raw JSONL only
 ```
 
 ## Dealer status
@@ -72,31 +95,26 @@ headed for CDK).
 
 ## Action items, ranked
 
-1. **(easy, high value)** Wire `append_to_timeseries` into
-   `run_daily.py` so every daily run automatically updates
-   `data/processed/timeseries.parquet`. Today the orchestrator only
-   writes the raw JSONL; the timeseries append is a separate manual
-   call. ~10 LOC change in `scripts/run_daily.py`.
-2. **(easy, high value)** Set up the local cron / launchd job so the
-   pipeline runs daily without user intervention. See
-   [`SETUP.md`](SETUP.md) §A or write a `~/Library/LaunchAgents/com.colby.vw-scraper.plist` —
-   1 file, ~30 lines. The GitHub Actions cron in
-   `.github/workflows/daily-scrape.yml` is intentionally disabled
-   pending Drive credentials.
-3. **(medium)** Try VW0005 Nanuet in headed mode — if it works, file a
-   small change to run CDK headed. Otherwise mark
-   `active=false` like VW0001.
-4. **(medium)** Verify VW0003 Piazza dealer status — phone the
-   dealership at `(631) 650-3400` (oh wait that's West Islip; Piazza is
-   `(610) 896-4853`). If the dealership is operating from a new web
-   address, update the registry.
-5. **(low, do once 7+ days of data exist)** Build the analytics
+1. **(medium)** Try VW0005 Nanuet in headed mode — `uv run python
+   scripts/scrape_one.py VW0005 --headed` from an active desktop
+   session. If the services page renders, file a small change to mark
+   CDK as headed-only and the launchd job will pick it up. Otherwise
+   mark `active=false` like VW0001.
+2. **(medium)** Verify VW0003 Piazza dealer status — phone the
+   dealership at `(610) 896-4853`. If the dealership is operating from
+   a new web address, update the registry.
+3. **(low, do once 7+ days of data exist)** Build the analytics
    notebook (Slice 10): network-average lead time, next-day appointment
    rate, scheduling flow seconds heatmap. Code skeleton already in
    `notebooks/` placeholder.
-6. **(deferred until scale matters)** Google Drive credentials and the
+4. **(deferred until scale matters)** Google Drive credentials and the
    GitHub Actions cron — see `SETUP.md` §A. Not blocking anything; just
    means the data lives only on this machine for now.
+
+### Done
+
+- ✅ Wired `append_to_timeseries` into `run_daily.py` (commit `<TBD>`).
+- ✅ Scheduled via launchd at 9 AM daily (plist in `~/Library/LaunchAgents/`).
 
 ## What's in good shape
 

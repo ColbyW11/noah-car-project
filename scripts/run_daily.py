@@ -1,8 +1,10 @@
 """CLI: run the daily scrape across every active dealer in the registry.
 
 Writes one JSONL line per dealer to `<output-dir>/YYYY-MM-DD/observations.jsonl`
-and a sibling `run_metadata.json` describing the run. Idempotent: re-running
-the same date cleanly replaces the partition.
+and a sibling `run_metadata.json` describing the run, then appends successful
+observations to `data/processed/timeseries.parquet`. Idempotent: re-running
+the same date cleanly replaces both the JSONL partition and that date's rows
+in the parquet.
 
 Exit codes:
     0 — run completed (any mix of success/error ScrapeResults; partial failures
@@ -13,6 +15,7 @@ Exit codes:
     uv run python scripts/run_daily.py
     uv run python scripts/run_daily.py --output-dir /tmp/vw-smoke
     uv run python scripts/run_daily.py --concurrency 3 --headed
+    uv run python scripts/run_daily.py --skip-timeseries   # raw only
 """
 
 from __future__ import annotations
@@ -26,10 +29,12 @@ from pathlib import Path
 import structlog
 
 from vw_scraper.orchestrator import run_daily
+from vw_scraper.storage.timeseries import append_to_timeseries
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REGISTRY_CSV = REPO_ROOT / "data" / "dealer_master.csv"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "raw"
+DEFAULT_TIMESERIES_PATH = REPO_ROOT / "data" / "processed" / "timeseries.parquet"
 
 
 def _configure_logging(debug: bool) -> None:
@@ -75,8 +80,21 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Enable DEBUG-level logs.",
     )
+    parser.add_argument(
+        "--timeseries-path",
+        type=Path,
+        default=DEFAULT_TIMESERIES_PATH,
+        help="Path to the master timeseries parquet "
+        "(default: data/processed/timeseries.parquet).",
+    )
+    parser.add_argument(
+        "--skip-timeseries",
+        action="store_true",
+        help="Write raw JSONL only; don't append to the master parquet.",
+    )
     args = parser.parse_args(argv)
     _configure_logging(debug=args.debug)
+    log = structlog.get_logger()
 
     if not args.registry.exists():
         print(f"registry not found: {args.registry}", file=sys.stderr)
@@ -94,6 +112,25 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 — surface any unexpected failure
         print(f"run_daily failed: {exc}", file=sys.stderr)
         return 1
+
+    # Append successful observations to the master parquet — idempotent on
+    # the observation_date so a same-day re-run replaces rather than
+    # duplicates. We do this here (rather than inside the orchestrator) so
+    # the orchestrator stays focused on scraping and so a parquet write
+    # failure can't silently swallow the raw JSONL we just wrote.
+    if not args.skip_timeseries:
+        jsonl_path = args.output_dir / metadata.observation_date.isoformat() / "observations.jsonl"
+        try:
+            args.timeseries_path.parent.mkdir(parents=True, exist_ok=True)
+            rows_written = append_to_timeseries(jsonl_path, args.timeseries_path)
+            log.info(
+                "timeseries_appended",
+                rows_written=rows_written,
+                parquet_path=str(args.timeseries_path),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.error("timeseries_append_failed", error=str(exc))
+            # Don't fail the whole run — the raw JSONL is already on disk.
 
     # JSON summary to stdout so it can be piped into jq.
     print(metadata.model_dump_json(indent=2))
