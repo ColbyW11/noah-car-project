@@ -113,8 +113,15 @@ headed for CDK).
 
 ### Done
 
-- ✅ Wired `append_to_timeseries` into `run_daily.py` (commit `<TBD>`).
+- ✅ Wired `append_to_timeseries` into `run_daily.py` — every run also
+  updates `data/processed/timeseries.parquet`.
 - ✅ Scheduled via launchd at 9 AM daily (plist in `~/Library/LaunchAgents/`).
+- ✅ macOS notification on degraded or failed runs — silent on full
+  success, banner with sound when `success_count < dealers_attempted`.
+  Suppress with `--no-notify` for manual debugging.
+- ✅ ConnectCDK walker extended for the free-text "Appointment Reason"
+  service variant — reaches 11 of ~13 steps for VW0005 Nanuet in
+  headed mode. Time-page date selectors still need mapping.
 
 ## What's in good shape
 

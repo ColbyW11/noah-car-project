@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
@@ -92,6 +93,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Write raw JSONL only; don't append to the master parquet.",
     )
+    parser.add_argument(
+        "--no-notify",
+        action="store_true",
+        help="Suppress macOS notification on degraded/failed runs.",
+    )
     args = parser.parse_args(argv)
     _configure_logging(debug=args.debug)
     log = structlog.get_logger()
@@ -135,9 +141,57 @@ def main(argv: list[str] | None = None) -> int:
     # JSON summary to stdout so it can be piped into jq.
     print(metadata.model_dump_json(indent=2))
 
+    # macOS notification on failure or degradation. Silent on full success
+    # — you only hear from the scraper when something needs attention.
+    if not args.no_notify:
+        _maybe_notify(metadata, log)
+
     if metadata.dealers_attempted > 0 and metadata.success_count == 0:
         return 2
     return 0
+
+
+def _maybe_notify(metadata: "RunMetadata", log: "structlog.stdlib.BoundLogger") -> None:  # type: ignore[name-defined]
+    """Fire a macOS banner via `osascript` when the run looks degraded.
+
+    Silent on full success (every active dealer produced slot data) since
+    a banner every morning trains you to ignore them. Fires when:
+
+      - All dealers errored (`success_count == 0`): bright red title.
+      - Some succeeded, some didn't (partial failure): yellow-flag title.
+
+    Failures here are themselves swallowed — a notification problem
+    shouldn't break the run.
+    """
+    attempted = metadata.dealers_attempted
+    succeeded = metadata.success_count
+    if attempted == 0:
+        return
+    if succeeded == attempted:
+        return  # all dealers succeeded; nothing to alert on
+
+    if succeeded == 0:
+        title = f"VW scraper FAILED ({attempted} dealers)"
+        msg = "Zero successful observations today. Check logs."
+    else:
+        title = f"VW scraper degraded ({succeeded}/{attempted})"
+        msg = f"{attempted - succeeded} dealer(s) failed. Logs: ~/Library/Logs/vw-scraper.err.log"
+
+    script = (
+        f'display notification "{msg}" '
+        f'with title "{title}" '
+        f'sound name "Submarine"'
+    )
+    try:
+        subprocess.run(
+            ["osascript", "-e", script],
+            check=False,
+            timeout=5,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("notify_failed", error=str(exc))
 
 
 if __name__ == "__main__":
