@@ -43,6 +43,8 @@ uv run python scripts/run_daily.py            # all active dealers → data/raw 
 uv run python scripts/scrape_one.py VW0002    # single dealer → stdout
 uv run python scripts/run_daily.py --headed   # show the browser (debug only)
 uv run python scripts/run_daily.py --skip-timeseries  # raw JSONL only
+uv run python scripts/analyze.py              # weekly report → data/reports/
+uv run python scripts/health_check.py         # per-dealer success summary
 ```
 
 ## Dealer status
@@ -84,16 +86,12 @@ accepts `date` as the timestamp key.
 
 ## Action items, ranked
 
-1. **(easy)** Verify VW0003 Piazza dealer status — phone the
+1. **(yours)** Verify VW0003 Piazza dealer status — phone the
    dealership at `(610) 896-4853`. If the dealership is operating from
    a new web address, update the registry.
-2. **(low, do once 7+ days of data exist)** Build the analytics
-   notebook (Slice 10): network-average lead time, next-day appointment
-   rate, scheduling flow seconds heatmap. Code skeleton already in
-   `notebooks/` placeholder.
-3. **(deferred until scale matters)** Google Drive credentials and the
-   GitHub Actions cron — see `SETUP.md` §A. Not blocking anything; just
-   means the data lives only on this machine for now.
+2. **(yours, optional)** Set up Google Drive credentials per
+   [`SETUP.md`](SETUP.md) if you want the pipeline to mirror data off-
+   laptop. Not blocking anything.
 
 ### Done
 
@@ -106,6 +104,18 @@ accepts `date` as the timestamp key.
   Suppress with `--no-notify` for manual debugging.
 - ✅ ConnectCDK walker fully wired: catalog + disclaimer modal +
   transport modal + slot XHR parser.
+- ✅ Analytics tooling (`scripts/analyze.py`) — answers the three
+  SPEC.md questions (network avg lead time, next-day rate, per-dealer
+  friction) plus an availability heatmap. Writes 4 PNGs +
+  `weekly_summary.md` to `data/reports/`.
+- ✅ Health-check script (`scripts/health_check.py`) — per-dealer
+  success rate over last N days, flags dealers with zero successes
+  (catches walker breakage that the per-run notification misses).
+- ✅ Generic dealer probe preserved at
+  `scripts/diagnostics/probe_dealer_page.py` for future debugging or
+  onboarding new dealers.
+- ✅ `SETUP.md` trimmed — now only documents the optional Drive
+  credentials; pipeline-state lives in this file.
 
 ## What's in good shape
 
