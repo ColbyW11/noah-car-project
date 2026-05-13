@@ -1,5 +1,12 @@
 # Claude Code Kickoff Guide
 
+> **Historical (preserved 2026-05-13).** This file is the original
+> session-1 bootstrap prompt from when the project was empty. All 11
+> slices have since shipped — current pipeline status, runbook, and
+> action items live in [`STATUS.md`](./STATUS.md). Kept for reference
+> in case the project is ever forked or re-bootstrapped from scratch.
+
+
 ## Before you open Claude Code
 
 1. Create an empty directory and drop these files into it:
