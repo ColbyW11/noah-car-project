@@ -506,8 +506,14 @@ async def _walk_connect_cdk(
     await _try_click(frame, "#next-button", "next: vehicle → services", state, bound_log)
     await asyncio.sleep(3.0)
 
-    # Step 2: Service selection. ConnectCDK shows a tile/list of services
-    # with checkboxes — Oil Change is the target.
+    # Step 2: Service selection. ConnectCDK dealers configure this two
+    # ways:
+    #   (a) Preset service tiles with checkboxes — pick Oil Change.
+    #   (b) Free-text "Appointment Reason" textarea + ADD SERVICE button —
+    #       dealer skips the curated catalog entirely. VW0005 Nanuet
+    #       runs this variant.
+    # Try the tile variant first; fall back to the free-text variant.
+    tile_clicked = False
     for label, selector in (
         ("service oil change tile", "[class*='service']:has-text('Oil Change')"),
         ("service oil change li", "li:has-text('Oil Change')"),
@@ -517,8 +523,76 @@ async def _walk_connect_cdk(
         ("service engine oil tile", "[class*='service']:has-text('Engine oil')"),
     ):
         if await _try_click(frame, selector, label, state, bound_log):
+            tile_clicked = True
             await asyncio.sleep(2.0)
             break
+
+    if not tile_clicked:
+        # Free-text variant: a textarea labeled "Appointment Reason"
+        # (max 200 chars) + an ADD SERVICE button that commits the
+        # service to the appointment.
+        try:
+            textarea = frame.locator(
+                "textarea, [contenteditable='true'], input[placeholder*='reason' i]"
+            ).first
+            await textarea.wait_for(state="visible", timeout=5_000)
+            await textarea.click(timeout=3_000)
+            await textarea.fill("Oil Change", timeout=3_000)
+            state.interaction_steps += 1
+            bound_log.debug("step_fill", label="service: appointment reason")
+            await asyncio.sleep(0.8)
+        except (PlaywrightTimeoutError, PlaywrightError) as exc:
+            bound_log.debug("appointment_reason_not_found", err=str(exc)[:120])
+        # Click ADD SERVICE. The button text is uppercased via CSS but
+        # Playwright's `:has-text` matches case-insensitively. We try
+        # several DOM shapes (Material-styled label inside button,
+        # role=button div) plus a JS-evaluate fallback that walks the
+        # DOM tree directly.
+        add_service_clicked = False
+        for label, selector in (
+            ("add service button", "button:has-text('Add Service')"),
+            ("add service generic", "[role='button']:has-text('Add Service')"),
+            ("add service text", "text=Add Service"),
+            ("add service mdc", "button.mdc-button:has-text('Add')"),
+        ):
+            if await _try_click(frame, selector, label, state, bound_log):
+                add_service_clicked = True
+                await asyncio.sleep(2.0)
+                break
+        if not add_service_clicked:
+            # JS fallback: find ANY clickable element with "ADD SERVICE"
+            # text and dispatch a click. The selector engine sometimes
+            # misses Material spans/labels that visually render as
+            # buttons but aren't `<button>` themselves.
+            try:
+                clicked = await frame.evaluate(
+                    """
+                    () => {
+                      const candidates = Array.from(
+                        document.querySelectorAll('button, [role=button], a, span.mdc-button__label')
+                      ).filter(el =>
+                        el.offsetParent !== null &&
+                        (el.innerText || '').trim().toUpperCase().startsWith('ADD SERVICE')
+                      );
+                      if (!candidates.length) return false;
+                      // Walk up to the actual button container if we
+                      // matched the inner label span.
+                      let target = candidates[0];
+                      if (target.tagName === 'SPAN' && target.closest('button')) {
+                        target = target.closest('button');
+                      }
+                      target.click();
+                      return true;
+                    }
+                    """
+                )
+                if clicked:
+                    state.interaction_steps += 1
+                    bound_log.debug("step_click", label="add service (js fallback)")
+                    add_service_clicked = True
+                    await asyncio.sleep(2.0)
+            except (PlaywrightTimeoutError, PlaywrightError) as exc:
+                bound_log.debug("add_service_js_fallback_failed", err=str(exc)[:120])
 
     # Continue to Time step.
     await _try_click(frame, "#next-button", "next: services → time", state, bound_log)
