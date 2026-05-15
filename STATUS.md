@@ -1,5 +1,40 @@
 # Project Status — 2026-05-13 (3 of 3 active dealers working)
 
+## Production cutover quickstart (GitHub Actions, ~30 min)
+
+The workflow at `.github/workflows/daily-scrape.yml` is wired and
+scheduled (13:00 UTC daily) but waiting on two secrets and an empty
+data repo. See [`DEPLOY.md`](./DEPLOY.md) for the full architecture
+discussion and why GH Actions beats a VM for this scale.
+
+**What this enables, once finished:**
+- Daily 13:00 UTC (9 AM ET) scrape on a fresh GitHub-hosted Ubuntu runner
+- Slack alert on degraded runs (>25% dealer failures) or run-level exceptions
+- Daily commit to `vw-scraper-data` with `raw/<date>/` + `processed/timeseries.parquet`
+- $0/mo
+
+**Six steps to cut over:**
+
+1. `gh repo create ColbyW11/vw-scraper-data --private`
+   — empty private repo for the daily data drops.
+2. Generate a **fine-grained PAT** (GitHub Settings → Developer settings
+   → Personal access tokens → Fine-grained tokens) scoped *only* to
+   `vw-scraper-data`, with **Contents: read & write**.
+3. `gh secret set VW_SCRAPER_DATA_TOKEN` — paste the PAT.
+4. `gh secret set VW_SCRAPER_SLACK_WEBHOOK` — paste a Slack incoming-webhook
+   URL. (Skip this if you don't want Slack alerts; `alerts.py` becomes a
+   no-op when the secret is unset.)
+5. Push the current branch. In the Actions tab, run **Daily scrape** via
+   `workflow_dispatch` to smoke-test. Confirm a commit lands in
+   `vw-scraper-data`.
+6. After 7 days of clean GH runs in parallel with the laptop, retire the
+   launchd jobs:
+   ```
+   launchctl bootout gui/$UID/com.colby.vw-scraper.daily
+   launchctl bootout gui/$UID/com.colby.vw-scraper.weekly
+   launchctl bootout gui/$UID/com.colby.vw-scraper.logrotate
+   ```
+
 ## Where the data lives
 
 Each daily run writes to two places:
