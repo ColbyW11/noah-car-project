@@ -93,6 +93,7 @@ uv run python scripts/run_daily.py --headed   # show the browser (debug only)
 uv run python scripts/run_daily.py --skip-timeseries  # raw JSONL only
 uv run python scripts/analyze.py              # weekly report → data/reports/
 uv run python scripts/health_check.py         # per-dealer success summary
+uv run streamlit run scripts/dashboard.py     # interactive dashboard → http://localhost:8501
 ```
 
 ## Dealer status

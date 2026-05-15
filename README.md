@@ -35,11 +35,14 @@ uv run python scripts/run_daily.py
 # Single dealer to stdout (useful for debugging).
 uv run python scripts/scrape_one.py VW0002
 
-# Generate the weekly report on demand.
+# Generate the static weekly report on demand.
 uv run python scripts/analyze.py
 
 # Per-dealer success rate over the last 7 days.
 uv run python scripts/health_check.py
+
+# Interactive dashboard (Streamlit) — opens at http://localhost:8501
+uv run streamlit run scripts/dashboard.py
 ```
 
 ## Scheduled runs (macOS launchd)
@@ -53,6 +56,24 @@ in [`STATUS.md`](./STATUS.md#how-it-runs).
 | Sunday 10 AM | `com.colby.vw-scraper.weekly` | Health check — banner if any active dealer was silent the past 7 days. |
 
 Plists are in `~/Library/LaunchAgents/`; logs in `~/Library/Logs/`.
+
+## Interactive dashboard
+
+`uv run streamlit run scripts/dashboard.py` opens a browser-based
+dashboard at `http://localhost:8501` with three tabs:
+
+- **Availability** — lead-time trend per dealer, day×hour slot heatmap,
+  slots-offered-per-future-date bars.
+- **Scraper health** — per-dealer × per-day status grid, error-category
+  breakdown, scheduling-flow box plots, run duration.
+- **Per-dealer comparison** — ranked dealer table joined with the
+  registry, friction-vs-availability scatter.
+
+Sidebar filters (date range, dealer subset, include-errors toggle)
+apply to every chart. Data is read from `data/processed/timeseries.parquet`
+and the raw JSONL — no server, no extra setup. The cache is keyed on
+file mtime, so re-running `scripts/run_daily.py` and refreshing the
+browser is enough to see new data.
 
 ## What lands each run
 
@@ -92,6 +113,7 @@ scripts/
   run_daily.py          # CLI: full daily run + parquet + report
   scrape_one.py         # CLI: single dealer scrape
   analyze.py            # CLI: regenerate weekly report
+  dashboard.py          # Streamlit: interactive 3-tab dashboard
   health_check.py       # CLI: per-dealer success rate
   discover_platforms.py # CLI: identify platform for new dealers
   diagnostics/          # Probes for debugging walker breakage
