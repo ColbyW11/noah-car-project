@@ -1,23 +1,27 @@
 name: Daily scrape
 
-# Runs the full pipeline unattended: scrape every active dealer, sync raw +
-# processed outputs to Google Drive, and Slack-alert on run-level exceptions or
-# degraded runs (>25% dealer failures). See scripts/ci_run.py for thresholds.
+# Runs the full pipeline unattended on GitHub Actions:
+#   1. Scrape every active dealer (scripts/ci_run.py).
+#   2. Push raw + processed outputs to the separate `vw-scraper-data` repo.
+#   3. Slack-alert on run-level exceptions or degraded runs (>25% dealer
+#      failures) — handled inside ci_run.py.
+#
+# Required GitHub Actions secrets:
+#   - VW_SCRAPER_SLACK_WEBHOOK: incoming-webhook URL for the alerts channel
+#   - VW_SCRAPER_DATA_TOKEN:    fine-grained PAT with contents:write on
+#                               the ColbyW11/vw-scraper-data repo
+#
+# Drive sync is now opt-in: ci_run.py skips it when env vars are unset.
+# To re-enable Drive (in addition to or instead of the data-repo push),
+# set VW_SCRAPER_DRIVE_FOLDER_ID + GCP_SERVICE_ACCOUNT_JSON and re-add
+# the "Write service account JSON" + Drive-env-var steps from git history.
 
 on:
-  # Scheduled cron deliberately disabled until Drive secrets are configured
-  # AND the live scrapers are repaired (see SETUP.md). With no secrets, every
-  # cron run would hard-fail in ci_run.py; with broken scrapers, even a green
-  # run would produce zero successful observations. Re-enable by uncommenting
-  # the schedule block once SETUP.md's checklist is done.
-  # schedule:
-  #   - cron: "0 13 * * *"  # 13:00 UTC ≈ 9am ET
+  schedule:
+    - cron: "0 13 * * *"  # 13:00 UTC ≈ 9 AM ET (8 AM ET during DST shift)
   workflow_dispatch: {}
 
 concurrency:
-  # Never let a manually-dispatched run collide with the cron run — Drive sync
-  # is idempotent but two concurrent writers to the same partition still risks
-  # `observations.jsonl` ping-ponging between the two runs' results.
   group: daily-scrape
   cancel-in-progress: false
 
@@ -27,16 +31,11 @@ permissions:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
-      VW_SCRAPER_DRIVE_FOLDER_ID: ${{ secrets.VW_SCRAPER_DRIVE_FOLDER_ID }}
       VW_SCRAPER_SLACK_WEBHOOK: ${{ secrets.VW_SCRAPER_SLACK_WEBHOOK }}
-      # /tmp is writable on ubuntu-latest and the runner is ephemeral, so we
-      # don't need `runner.temp` (which is step-context only and fails workflow
-      # parsing at job-env level — caused the 2026-04-21 push run to fail in 0s).
-      VW_SCRAPER_SA_PATH: /tmp/sa.json
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Install uv (pinned Python)
@@ -45,30 +44,66 @@ jobs:
           python-version: "3.11"
 
       - name: Sync dependencies
-        # --frozen enforces the committed uv.lock so CI sees exactly the deps
-        # tested locally. Drop this flag only when intentionally bumping deps.
         run: uv sync --frozen
 
       - name: Install Playwright browsers
         run: uv run playwright install --with-deps chromium
 
-      - name: Write service account JSON from secret
-        # printf '%s' (not echo) preserves the multi-line JSON verbatim.
-        # chmod 600 even though the runner is ephemeral — defense in depth.
-        env:
-          SA_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
-        run: |
-          printf '%s' "$SA_JSON" > "$VW_SCRAPER_SA_PATH"
-          chmod 600 "$VW_SCRAPER_SA_PATH"
-
       - name: Run daily pipeline
         id: pipeline
+        # ci_run.py: scrape + threshold check + Slack alert. Drive sync is
+        # skipped because VW_SCRAPER_SA_PATH / VW_SCRAPER_DRIVE_FOLDER_ID
+        # are not set in env — the next step handles persistence instead.
         run: uv run python scripts/ci_run.py
 
+      - name: Push outputs to data repo
+        # Pushes ./data/raw/<today>/ and ./data/processed/timeseries.parquet
+        # to ColbyW11/vw-scraper-data, then commits and pushes. The data
+        # repo is private — only the daily run and Colby's laptop have
+        # write access (via the PAT).
+        #
+        # Always runs (even if the pipeline step partially failed) so we
+        # don't lose data that did get scraped. Adjust to `if: success()`
+        # if you'd rather keep the data repo clean of partial runs.
+        if: always() && steps.pipeline.outcome != 'cancelled'
+        env:
+          GH_TOKEN: ${{ secrets.VW_SCRAPER_DATA_TOKEN }}
+          # Data repo URL (no protocol — we'll inject the token). Override
+          # via repo variable VW_SCRAPER_DATA_REPO if you rename it later.
+          DATA_REPO: ${{ vars.VW_SCRAPER_DATA_REPO || 'ColbyW11/vw-scraper-data' }}
+        run: |
+          set -euo pipefail
+          if [ ! -d data/raw ] && [ ! -f data/processed/timeseries.parquet ]; then
+            echo "No data produced by this run; skipping push."
+            exit 0
+          fi
+          git clone --depth=1 \
+            "https://x-access-token:${GH_TOKEN}@github.com/${DATA_REPO}.git" \
+            /tmp/data-repo
+          mkdir -p /tmp/data-repo/raw /tmp/data-repo/processed
+          # rsync rather than cp -r so we don't duplicate the data/ dir layer.
+          if [ -d data/raw ]; then
+            rsync -a data/raw/ /tmp/data-repo/raw/
+          fi
+          if [ -f data/processed/timeseries.parquet ]; then
+            cp data/processed/timeseries.parquet /tmp/data-repo/processed/
+          fi
+          cd /tmp/data-repo
+          git config user.name "vw-scraper-bot"
+          git config user.email "noreply@github.com"
+          git add raw processed
+          if git diff --staged --quiet; then
+            echo "No data changes to push."
+          else
+            git commit -m "Daily scrape $(date -u +%Y-%m-%d)"
+            git push
+          fi
+
       - name: Alert on infrastructure failure
-        # ci_run.py self-alerts on its own exceptions (outcome=failure),
-        # so we only cover the case where the pipeline step never ran:
-        # setup-uv, uv sync, playwright install, or secret-write failed.
+        # ci_run.py self-alerts on its own exceptions, so this only catches
+        # the case where the workflow exploded before reaching the pipeline
+        # step (setup-uv, uv sync, playwright install) OR the push step
+        # failed. We send the Slack alert from the runner directly.
         if: failure() && steps.pipeline.outcome != 'failure'
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -77,7 +112,7 @@ jobs:
           import os
           from vw_scraper.alerts import send_slack_alert
           send_slack_alert(
-              f"Daily scrape workflow failed before reaching the pipeline step: {os.environ['RUN_URL']}",
+              f"Daily scrape workflow failed in setup or push step: {os.environ['RUN_URL']}",
               severity="error",
           )
           PY

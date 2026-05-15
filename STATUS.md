@@ -99,12 +99,29 @@ accepts `date` as the timestamp key.
 
 ## Action items, ranked
 
-1. **(yours)** Verify VW0003 Piazza dealer status — phone the
+1. **(yours, 30 min) Cut over to GitHub Actions for production.**
+   Workflow is wired and waiting in
+   [`.github/workflows/daily-scrape.yml`](./.github/workflows/daily-scrape.yml).
+   See [`DEPLOY.md`](./DEPLOY.md) for full context. Steps:
+   1. `gh repo create ColbyW11/vw-scraper-data --private`
+      — empty private repo for the daily data drops.
+   2. Generate a fine-grained PAT (Settings → Developer settings → PATs)
+      scoped to the new repo, with **contents: read & write**.
+   3. `gh secret set VW_SCRAPER_DATA_TOKEN` (paste the PAT).
+   4. `gh secret set VW_SCRAPER_SLACK_WEBHOOK` (or skip — workflow runs
+      without it; alerts just become no-ops).
+   5. Push the current branch. In the Actions tab, run "Daily scrape"
+      via `workflow_dispatch` to smoke-test.
+   6. After 7 days of clean GH runs in parallel, bootout the laptop
+      launchd jobs:
+      `launchctl bootout gui/$UID/com.colby.vw-scraper.{daily,weekly,logrotate}`.
+2. **(yours)** Verify VW0003 Piazza dealer status — phone the
    dealership at `(610) 896-4853`. If the dealership is operating from
    a new web address, update the registry.
-2. **(yours, optional)** Set up Google Drive credentials per
-   [`SETUP.md`](SETUP.md) if you want the pipeline to mirror data off-
-   laptop. Not blocking anything.
+3. **(yours, optional)** Set up Google Drive credentials per
+   [`SETUP.md`](SETUP.md) if you also want Drive mirroring.
+   `ci_run.py` now skips Drive when env vars are unset, so it's purely
+   additive on top of the data-repo push.
 
 ### Done
 

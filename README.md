@@ -12,6 +12,8 @@ how to run anything manually.
 Other reference docs:
 - [`SPEC.md`](./SPEC.md) — authoritative project definition + data model
 - [`CLAUDE.md`](./CLAUDE.md) — coding conventions
+- [`DEPLOY.md`](./DEPLOY.md) — production deployment plan (3 paths
+  with tradeoffs; recommended path for a small startup)
 - [`SLICES.md`](./SLICES.md) — historical build plan (slices 0–10, all
   completed)
 - [`SETUP.md`](./SETUP.md) — _optional_ Google Drive / GitHub Actions

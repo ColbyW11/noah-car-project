@@ -38,7 +38,7 @@ import structlog
 
 from vw_scraper.alerts import send_slack_alert
 from vw_scraper.orchestrator import RunMetadata, run_daily
-from vw_scraper.storage.drive import build_drive_service, sync_outputs
+from vw_scraper.storage.drive import SyncSummary, build_drive_service, sync_outputs
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REGISTRY = REPO_ROOT / "data" / "dealer_master.csv"
@@ -106,13 +106,19 @@ def main(argv: list[str] | None = None) -> int:
 
     sa_path_raw = os.environ.get(_ENV_SA_PATH)
     folder_id = os.environ.get(_ENV_FOLDER_ID)
-    if not sa_path_raw:
-        print(f"{_ENV_SA_PATH} is not set.", file=sys.stderr)
+    # Drive sync is now optional. When both env vars are set, we sync; when
+    # neither is set, we skip silently (the GH Actions workflow handles
+    # persistence by pushing to a separate data repo). Half-configured state
+    # — one var set, the other not — is still an error to catch typos.
+    drive_configured = bool(sa_path_raw) and bool(folder_id)
+    if bool(sa_path_raw) != bool(folder_id):
+        which = _ENV_SA_PATH if not sa_path_raw else _ENV_FOLDER_ID
+        print(
+            f"Drive env vars are half-set: {which} is missing. "
+            "Set both to enable Drive sync, or neither to skip it.",
+            file=sys.stderr,
+        )
         return 1
-    if not folder_id:
-        print(f"{_ENV_FOLDER_ID} is not set.", file=sys.stderr)
-        return 1
-    sa_path = Path(sa_path_raw).expanduser()
 
     # --- Phase 1: scrape -----------------------------------------------------
     try:
@@ -131,20 +137,27 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    # --- Phase 2: sync to Drive ---------------------------------------------
-    try:
-        service = build_drive_service(sa_path)
-        sync_summary = sync_outputs(service, args.data_dir, folder_id)
-    except Exception as exc:  # noqa: BLE001 — alert and exit; data is on an ephemeral runner
-        log.error("ci_drive_sync_failed", error=str(exc))
-        send_slack_alert(
-            (
-                f"Drive sync failed after scrape "
-                f"(run_id={metadata.run_id}, date={metadata.observation_date}): {exc}"
-            ),
-            severity="error",
-        )
-        return 1
+    # --- Phase 2: sync to Drive (optional) ----------------------------------
+    sync_summary: SyncSummary | None = None
+    if drive_configured:
+        assert sa_path_raw is not None  # narrowed by drive_configured
+        assert folder_id is not None
+        sa_path = Path(sa_path_raw).expanduser()
+        try:
+            service = build_drive_service(sa_path)
+            sync_summary = sync_outputs(service, args.data_dir, folder_id)
+        except Exception as exc:  # noqa: BLE001 — alert; data is on an ephemeral runner
+            log.error("ci_drive_sync_failed", error=str(exc))
+            send_slack_alert(
+                (
+                    f"Drive sync failed after scrape "
+                    f"(run_id={metadata.run_id}, date={metadata.observation_date}): {exc}"
+                ),
+                severity="error",
+            )
+            return 1
+    else:
+        log.info("ci_drive_sync_skipped", reason="env vars unset")
 
     # --- Phase 3: threshold check + alerting --------------------------------
     attempted = metadata.dealers_attempted
@@ -156,8 +169,8 @@ def main(argv: list[str] | None = None) -> int:
         success_count=metadata.success_count,
         error_count=metadata.error_count,
         error_rate=error_rate,
-        uploaded=sync_summary.uploaded,
-        skipped=sync_summary.skipped,
+        uploaded=sync_summary.uploaded if sync_summary else None,
+        skipped=sync_summary.skipped if sync_summary else None,
     )
 
     if attempted > 0 and metadata.success_count == 0:

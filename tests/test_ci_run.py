@@ -262,12 +262,15 @@ def test_missing_registry_returns_1_without_alert(
     wired["asyncio_run"].assert_not_called()
 
 
-def test_missing_sa_env_returns_1_without_alert(
+def test_half_set_drive_env_returns_1_without_alert(
     monkeypatch: pytest.MonkeyPatch,
     registry: Path,
     tmp_path: Path,
     wired: dict[str, MagicMock],
 ) -> None:
+    """Setting one Drive env var but not the other is almost always a typo —
+    fail loudly rather than silently skipping the sync. (Setting neither is
+    the supported skip-sync path.)"""
     monkeypatch.delenv("VW_SCRAPER_SA_PATH", raising=False)
     monkeypatch.setenv("VW_SCRAPER_DRIVE_FOLDER_ID", "folder-xyz")
 
@@ -278,20 +281,24 @@ def test_missing_sa_env_returns_1_without_alert(
     wired["asyncio_run"].assert_not_called()
 
 
-def test_missing_folder_env_returns_1_without_alert(
+def test_neither_drive_env_set_skips_sync_and_still_runs(
     monkeypatch: pytest.MonkeyPatch,
     registry: Path,
     tmp_path: Path,
     wired: dict[str, MagicMock],
 ) -> None:
-    sa_file = tmp_path / "sa.json"
-    sa_file.write_text("{}")
-    monkeypatch.setenv("VW_SCRAPER_SA_PATH", str(sa_file))
+    """The GH Actions deploy doesn't set Drive env vars — persistence is
+    handled by a separate git-push step. ci_run.py must skip the Drive
+    phase silently and still produce a successful exit code."""
+    monkeypatch.delenv("VW_SCRAPER_SA_PATH", raising=False)
     monkeypatch.delenv("VW_SCRAPER_DRIVE_FOLDER_ID", raising=False)
+    wired["asyncio_run"].return_value = _make_metadata(attempted=5, success=5)
 
     rc = ci_run.main(_argv(registry, tmp_path))
 
-    assert rc == 1
+    assert rc == 0
+    wired["sync_outputs"].assert_not_called()
+    wired["build_drive_service"].assert_not_called()
     wired["send_slack_alert"].assert_not_called()
 
 
