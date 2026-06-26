@@ -45,7 +45,6 @@ jobs:
     timeout-minutes: 30
     env:
       VW_SCRAPER_SLACK_WEBHOOK: ${{ secrets.VW_SCRAPER_SLACK_WEBHOOK }}
-      ALERT_FILE: ${{ runner.temp }}/alert.json
       DATA_REPO: ${{ vars.VW_SCRAPER_DATA_REPO || 'ColbyW11/vw-scraper-data' }}
     steps:
       - name: Checkout code
@@ -88,6 +87,10 @@ jobs:
         # ci_run.py: scrape + append to timeseries + threshold check. On a
         # degraded/all-failed run it writes $ALERT_FILE, which the alert step
         # turns into a GitHub issue. Drive sync is skipped (env vars unset).
+        # ALERT_FILE is set per-step (the `runner` context isn't available in
+        # job-level env) and lives under RUNNER_TEMP, shared across steps.
+        env:
+          ALERT_FILE: ${{ runner.temp }}/alert.json
         run: uv run python scripts/ci_run.py --alert-file "$ALERT_FILE"
 
       - name: Push outputs to data repo
@@ -147,6 +150,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           PIPELINE_OUTCOME: ${{ steps.pipeline.outcome }}
           PUSH_OUTCOME: ${{ steps.push.outcome }}
+          ALERT_FILE: ${{ runner.temp }}/alert.json
         run: |
           set -euo pipefail
           gh label create scraper-health --repo "$REPO" --color FBCA04 \
