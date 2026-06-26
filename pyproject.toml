@@ -37,6 +37,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "live: hits real dealer sites; skipped by default, run with `pytest -m live`",
+    "browser: launches a local headless browser against a saved fixture (no network); skipped by default, run with `pytest -m browser`",
 ]
 
 [tool.mypy]
