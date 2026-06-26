@@ -1,12 +1,13 @@
 # Production Deployment Plan
 
-How to take this pipeline from "Colby's laptop with launchd" to a
-production environment that doesn't depend on a single laptop staying
-on and awake. Aimed at a small startup (1–3 people, no DevOps hire),
-not enterprise scale.
+**Current state: deployed on Path 0 (GitHub Actions).** The pipeline no longer
+depends on a laptop staying on and awake — the daily run executes on a
+GitHub-hosted runner and pushes to the `vw-scraper-data` repo, and the laptop
+launchd jobs are retired. This file remains the reference for *why* GH Actions
+was chosen and for the scale-up paths (A–C) below if the project outgrows it.
 
-For current local-mode state and operational details, see
-[`STATUS.md`](./STATUS.md). This file is forward-looking only.
+Aimed at a small startup (1–3 people, no DevOps hire), not enterprise scale.
+For current operational details, see [`STATUS.md`](./STATUS.md).
 
 ---
 
@@ -14,19 +15,17 @@ For current local-mode state and operational details, see
 
 | Path | Monthly cost | Setup time | Best for |
 | --- | --- | --- | --- |
-| **0. GitHub Actions (you already use it)** ⭐ | $0 | 30 min | Solo founder, ≤30 dealers, daily cadence, no public API yet |
+| **0. GitHub Actions (current production)** ✅ | $0 | done | Solo founder, ≤30 dealers, daily cadence, no public API yet |
 | **A. Single VM ("boring stack")** | $5–15 | 2–4 hrs | When you outgrow GH Actions: need an API surface, anti-bot blocks GH runners, or >100 dealers |
 | **B. Managed PaaS (Fly.io / Railway)** | $15–40 | 1–2 hrs | Want zero infra ops, fine paying a small premium |
 | **C. GCP serverless (Cloud Run Jobs + GCS + BigQuery)** | $20–80 | 4–8 hrs | Plan to scale to 500+ dealers, want analytics-grade storage from day one |
 
-**Recommendation**: start with **Path 0** (GitHub Actions). You're
-already on GitHub, the workflow file is already mostly written, the
-free tier covers daily runs forever, and there's zero infrastructure
-to manage. Migrate to Path A only when something specific forces you
-off — most likely a dealer blocking Azure datacenter IPs, or wanting
-a public API on the same box. Skip B unless you specifically dislike
-SSH. Path C is the eventual destination only if the startup grows
-into hundreds of dealers.
+**Recommendation**: **Path 0** (GitHub Actions) — already in production. The
+free tier covers daily runs forever and there's zero infrastructure to manage.
+Migrate to Path A only when something specific forces you off — most likely a
+dealer blocking Azure datacenter IPs, or wanting a public API on the same box.
+Skip B unless you specifically dislike SSH. Path C is the eventual destination
+only if the startup grows into hundreds of dealers.
 
 ---
 

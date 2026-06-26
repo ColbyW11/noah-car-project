@@ -1,96 +1,81 @@
-# Project Status — 2026-05-13 (3 of 3 active dealers working)
+# Project Status — 2026-06-26 (GitHub Actions is production)
 
-## Production cutover quickstart (GitHub Actions, ~30 min)
+## TL;DR
 
-The workflow at `.github/workflows/daily-scrape.yml` is wired and
-scheduled (13:00 UTC daily) but waiting on two secrets and an empty
-data repo. See [`DEPLOY.md`](./DEPLOY.md) for the full architecture
-discussion and why GH Actions beats a VM for this scale.
-
-**What this enables, once finished:**
-- Daily 13:00 UTC (9 AM ET) scrape on a fresh GitHub-hosted Ubuntu runner
-- Slack alert on degraded runs (>25% dealer failures) or run-level exceptions
-- Daily commit to `vw-scraper-data` with `raw/<date>/` + `processed/timeseries.parquet`
-- $0/mo
-
-**Six steps to cut over:**
-
-1. `gh repo create ColbyW11/vw-scraper-data --private`
-   — empty private repo for the daily data drops.
-2. Generate a **fine-grained PAT** (GitHub Settings → Developer settings
-   → Personal access tokens → Fine-grained tokens) scoped *only* to
-   `vw-scraper-data`, with **Contents: read & write**.
-3. `gh secret set VW_SCRAPER_DATA_TOKEN` — paste the PAT.
-4. `gh secret set VW_SCRAPER_SLACK_WEBHOOK` — paste a Slack incoming-webhook
-   URL. (Skip this if you don't want Slack alerts; `alerts.py` becomes a
-   no-op when the secret is unset.)
-5. Push the current branch. In the Actions tab, run **Daily scrape** via
-   `workflow_dispatch` to smoke-test. Confirm a commit lands in
-   `vw-scraper-data`.
-6. After 7 days of clean GH runs in parallel with the laptop, retire the
-   launchd jobs:
-   ```
-   launchctl bootout gui/$UID/com.colby.vw-scraper.daily
-   launchctl bootout gui/$UID/com.colby.vw-scraper.weekly
-   launchctl bootout gui/$UID/com.colby.vw-scraper.logrotate
-   ```
+- **Production runs in the cloud.** GitHub Actions (`.github/workflows/daily-scrape.yml`)
+  scrapes every active dealer daily at 13:00 UTC on a fresh Ubuntu runner,
+  builds the processed time-series, and pushes `raw/<date>/` +
+  `processed/timeseries.parquet` to the private `ColbyW11/vw-scraper-data`
+  repo. $0/mo. Green daily since mid-June.
+- **The laptop launchd jobs are retired.** The cloud is the single source of
+  truth. (Plists remain on disk; `launchctl bootstrap` re-loads them if ever
+  needed — see [Local mode](#local-mode-retired).)
+- **3 of 3 active dealers working** again as of 2026-06-26. VW0002 Jeff was
+  silently broken ~May 26 → June 26 by an Xtime transport-step markup change;
+  fixed and re-producing ~150 slots/day.
+- **Alerts reach a human via GitHub issues.** A degraded run (>25% dealer
+  failures), an all-failed run, or an infra failure opens/updates a single
+  rolling `scraper-health` issue (built-in `GITHUB_TOKEN`, no external secret).
+  A healthy run closes it. Slack is still supported but optional/unset.
 
 ## Where the data lives
 
-Each daily run writes to two places:
+The daily cloud run writes to the `vw-scraper-data` repo:
 
-- **Raw, per-day**: `data/raw/<YYYY-MM-DD>/`
+- **Raw, per-day**: `raw/<YYYY-MM-DD>/`
   - `observations.jsonl` — one JSON line per dealer scrape (success or
     structured error), schema in [`SPEC.md`](SPEC.md). Atomic write +
     idempotent re-run replaces the date's partition.
-  - `run_metadata.json` — run-level summary (start/end time, success and
-    error counts, scraper version).
-- **Processed, append-only**: `data/processed/timeseries.parquet`
-  — every successful observation across all dates, flattened (no
-  per-slot detail; that lives in the raw JSONL). Same-day re-runs
-  replace that date's rows, never duplicate.
+  - `run_metadata.json` — run-level summary (start/end, success/error counts,
+    scraper version).
+- **Processed, append-only**: `processed/timeseries.parquet`
+  — every successful observation across all dates, flattened. Same-day re-runs
+  replace that date's rows, never duplicate. The cloud seeds each runner with
+  the existing parquet before the run so it accumulates day over day. Backfilled
+  May 17 → present from the retained raw partitions
+  (`scripts/backfill_timeseries.py`).
 
-Both paths are local-only. Google Drive sync is plumbed
-(`src/vw_scraper/storage/drive.py`, `scripts/sync_drive.py`) but the
-service-account credentials in [`SETUP.md`](SETUP.md) §A have not been
-configured yet, so syncing to Drive is a no-op until those are set up.
+For local analysis, `git clone`/`git pull` the data repo and point
+`scripts/dashboard.py` / `scripts/analyze.py` at its
+`processed/timeseries.parquet`.
 
-## How it runs
+Google Drive sync is still plumbed (`src/vw_scraper/storage/drive.py`) but
+opt-in and unconfigured — `ci_run.py` skips it silently when the env vars are
+unset.
 
-Two launchd jobs:
+## How it runs (production)
 
-| When | Job | Plist | What it does |
-| --- | --- | --- | --- |
-| **Daily, 9 AM** | `com.colby.vw-scraper.daily` | `~/Library/LaunchAgents/com.colby.vw-scraper.daily.plist` | Runs `scripts/run_daily.py` → writes JSONL + parquet, regenerates analytics, fires a macOS notification on failure or degraded run. |
-| **Sundays, 10 AM** | `com.colby.vw-scraper.weekly` | `~/Library/LaunchAgents/com.colby.vw-scraper.weekly.plist` | Runs `scripts/health_check.py --notify`. Catches silent walker breakage that the daily notification misses — fires a banner if any active dealer had zero successes in the past 7 days. |
-| **Daily, 4 AM** | `com.colby.vw-scraper.logrotate` | `~/Library/LaunchAgents/com.colby.vw-scraper.logrotate.plist` | Runs `scripts/rotate_logs.py`. Rotates any `~/Library/Logs/vw-scraper*.log` file >5MB, keeps 4 generations. Runs between the daily and weekly jobs so it never races a live writer. |
+`.github/workflows/daily-scrape.yml`, on `schedule: "0 13 * * *"` (and
+`workflow_dispatch`):
 
-Logs (rotated nightly at 4 AM, see `com.colby.vw-scraper.logrotate`):
-- Daily: `~/Library/Logs/vw-scraper.{out,err}.log`
-- Weekly: `~/Library/Logs/vw-scraper-weekly.{out,err}.log`
-- Logrotate itself: `~/Library/Logs/vw-scraper-logrotate.{out,err}.log`
+1. **Seed** — clone the data repo, copy its `processed/timeseries.parquet`
+   into `./data/processed/` so the append accumulates.
+2. **Pipeline** — `uv run python scripts/ci_run.py --alert-file …`: scrape all
+   active dealers → append to the parquet → degraded/all-failed threshold check
+   (writes the alert file on trouble).
+3. **Push** — rsync `raw/` + copy the parquet into the data-repo clone, commit,
+   push.
+4. **Alert** — turn the alert file (or any infra failure) into a rolling
+   `scraper-health` GitHub issue; close it on a healthy run.
 
-Common operations:
+Required secret: `VW_SCRAPER_DATA_TOKEN` (fine-grained PAT, contents:write on
+`vw-scraper-data`). Optional: `VW_SCRAPER_SLACK_WEBHOOK`.
 
 ```bash
-launchctl list | grep vw-scraper                                    # which jobs are loaded
-launchctl print gui/$UID/com.colby.vw-scraper.daily                 # status + next fire time
-launchctl kickstart -k gui/$UID/com.colby.vw-scraper.daily          # run the daily job NOW
-launchctl bootout gui/$UID/com.colby.vw-scraper.daily               # stop scheduling
-launchctl bootstrap gui/$UID/ ~/Library/LaunchAgents/<plist>        # (re)load a plist
+gh run list  --repo ColbyW11/noah-car-project --workflow "Daily scrape"   # recent runs
+gh workflow run "Daily scrape" --repo ColbyW11/noah-car-project            # run now
+gh issue list --repo ColbyW11/noah-car-project --label scraper-health      # open alerts
 ```
 
-If the laptop is asleep at 9 AM, launchd fires the job at next wake.
-Network failures, dealer-side outages, etc. don't break the schedule —
-the next day's run is independent.
-
-## Running manually
+## Running manually (local)
 
 ```bash
 uv run python scripts/run_daily.py            # all active dealers → data/raw + data/processed
 uv run python scripts/scrape_one.py VW0002    # single dealer → stdout
 uv run python scripts/run_daily.py --headed   # show the browser (debug only)
-uv run python scripts/run_daily.py --skip-timeseries  # raw JSONL only
+uv run python scripts/ci_run.py               # the exact cloud pipeline, locally
+uv run python scripts/backfill_timeseries.py --raw-dir <data-repo>/raw \
+    --timeseries-path <data-repo>/processed/timeseries.parquet  # rebuild parquet
 uv run python scripts/analyze.py              # weekly report → data/reports/
 uv run python scripts/health_check.py         # per-dealer success summary
 uv run streamlit run scripts/dashboard.py     # interactive dashboard → http://localhost:8501
@@ -100,111 +85,62 @@ uv run streamlit run scripts/dashboard.py     # interactive dashboard → http:/
 
 | Code   | Dealer             | Status              | Slots/day | Notes                                                                                                                            |
 | ------ | ------------------ | ------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| VW0001 | Teddy VW           | **inactive**        | —         | Dealer disabled online scheduling on their site (`enableScheduleServiceButtons = false`). Phone-only via (718) 920-1400.         |
-| VW0002 | Jeff D'Ambrosio VW | ✅ **working**      | ~117      | consumer.xtime.com modern SPA, webKey `vw20120702001037406497`.                                                                  |
-| VW0003 | Piazza VW          | **inactive**        | —         | Host unreachable (port 443 ECONNREFUSED). Redirect target `piazzaautogroup.com` is Akamai-bot-blocked. Possibly defunct dealer.  |
-| VW0004 | VW of West Islip   | ✅ **working**      | ~197      | TeamVelocity inline form on dealer.com, `xtime.teamvelocityportal.com` backend.                                                  |
-| VW0005 | VW of Nanuet       | ✅ **working**      | ~88       | ConnectCDK 5-step wizard via `api.connectcdk.com` iframe + transport-modal dialog. Slots from `/Availability/AvailableSlots`.    |
+| VW0001 | Teddy VW           | **inactive**        | —         | Dealer disabled online scheduling (`enableScheduleServiceButtons = false`). Phone-only via (718) 920-1400.                       |
+| VW0002 | Jeff D'Ambrosio VW | ✅ **working**      | ~150      | consumer.xtime.com SPA, webKey `vw20120702001037406497`. Transport step is now a `.panel-drop-off__slot` checkbox row (see below). |
+| VW0003 | Piazza VW          | **inactive**        | —         | Host unreachable (443 ECONNREFUSED); redirect target Akamai-bot-blocked. Likely defunct — phone (610) 896-4853 to confirm.       |
+| VW0004 | VW of West Islip   | ✅ **working**      | ~150–200  | TeamVelocity inline form on dealer.com, `xtime.teamvelocityportal.com` backend.                                                  |
+| VW0005 | VW of Nanuet       | ✅ **working**      | ~80–90    | ConnectCDK 5-step wizard via `api.connectcdk.com` iframe + transport-modal dialog. Slots from `/Availability/AvailableSlots`.    |
 
-## Fixing the missing dealers
+### VW0002 Jeff — the 2026-06 regression (fixed)
 
-**VW0001 Teddy** — Nothing to scrape until the dealer re-enables online
-scheduling. Their `/ScheduleService` page intentionally renders empty for
-all visitors. If they ever turn it back on, the `secureoffersites.com`
-Vue3 SPA will need its own scraper (it's neither Xtime nor ConnectCDK).
-**Action**: monitor — re-check once a quarter by curling the page and
-grepping for `enableScheduleServiceButtons = '...'`. No code change
-needed today.
+consumer.xtime's transportation step changed from `role="radio"` options to a
+`<div class="panel-drop-off__slot">` row wrapping a
+`<div role="checkbox" aria-label="I'll wait at the dealership"|"I have a ride">`.
+The walker only looked for `[role='radio']`, selected nothing, clicked NEXT on
+an invalid form, and the availability XHR never fired → a silent 120s timeout
+every day. Fix: `TRANSPORT_OPTION_SELECTORS` in
+`src/vw_scraper/scrapers/xtime.py` (click the `.panel-drop-off__slot` row, with
+legacy radio + TeamVelocity `<label>` fallbacks). Regression fixture +
+browser-marked test in `tests/scrapers/test_xtime_transport_step.py` /
+`tests/fixtures/scrapers/xtime/transport_step_2026/`.
 
-**VW0003 Piazza** — DNS resolves to `64.70.56.99` but TCP 443 refuses;
-HTTP 80 redirects to `piazzaautogroup.com/locations/volkswagen.htm`
-which returns 403 (Akamai BOT-BROWSER-IMPERSONATOR). Likely the dealer
-has migrated or shut down. **Action**: verify whether the dealership is
-still operating; if so, find their new schedule URL (possibly on the
-parent `piazzaautogroup.com` group site).
+### Fixing the missing dealers
 
-**VW0005 Nanuet (ConnectCDK)** — Resolved. Walker drives the full
-5-step wizard: NEW CUSTOMER → vehicle picker (Make/Year/Model/mileage
-via React-aware native value setter) → catalog "Oil And Filter -
-Change" with disclaimer modal confirm → page-NEXT opens transport
-modal → pick "I will drop off my vehicle" radio →
-`transportation-dialog-next-button` advances to time page → CDK fires
-`/Availability/AvailableSlots?cid=2001816` with a list of `{date,
-isAvailable}` slots. Parser now filters `isAvailable: false` and
-accepts `date` as the timestamp key.
+**VW0001 Teddy** — nothing to scrape until the dealer re-enables online
+scheduling. Re-check quarterly: curl `/ScheduleService` and grep for
+`enableScheduleServiceButtons = '...'`.
+
+**VW0003 Piazza** — likely migrated or shut down. Verify the dealership is
+operating; if so, find its new schedule URL and update the registry.
+
+## Local mode (retired)
+
+The laptop launchd jobs (`com.colby.vw-scraper.{daily,weekly,logrotate}`) have
+been retired (`launchctl bootout`). The cloud is authoritative. The plists are
+still on disk in `~/Library/LaunchAgents/`; to re-enable local runs:
+
+```bash
+launchctl bootstrap gui/$UID/ ~/Library/LaunchAgents/com.colby.vw-scraper.daily.plist
+launchctl bootstrap gui/$UID/ ~/Library/LaunchAgents/com.colby.vw-scraper.weekly.plist
+launchctl bootstrap gui/$UID/ ~/Library/LaunchAgents/com.colby.vw-scraper.logrotate.plist
+```
 
 ## Action items, ranked
 
-1. **(yours, 30 min) Cut over to GitHub Actions for production.**
-   Workflow is wired and waiting in
-   [`.github/workflows/daily-scrape.yml`](./.github/workflows/daily-scrape.yml).
-   See [`DEPLOY.md`](./DEPLOY.md) for full context. Steps:
-   1. `gh repo create ColbyW11/vw-scraper-data --private`
-      — empty private repo for the daily data drops.
-   2. Generate a fine-grained PAT (Settings → Developer settings → PATs)
-      scoped to the new repo, with **contents: read & write**.
-   3. `gh secret set VW_SCRAPER_DATA_TOKEN` (paste the PAT).
-   4. `gh secret set VW_SCRAPER_SLACK_WEBHOOK` (or skip — workflow runs
-      without it; alerts just become no-ops).
-   5. Push the current branch. In the Actions tab, run "Daily scrape"
-      via `workflow_dispatch` to smoke-test.
-   6. After 7 days of clean GH runs in parallel, bootout the laptop
-      launchd jobs:
-      `launchctl bootout gui/$UID/com.colby.vw-scraper.{daily,weekly,logrotate}`.
-2. **(yours)** Verify VW0003 Piazza dealer status — phone the
-   dealership at `(610) 896-4853`. If the dealership is operating from
-   a new web address, update the registry.
-3. **(yours, optional)** Set up Google Drive credentials per
-   [`SETUP.md`](SETUP.md) if you also want Drive mirroring.
-   `ci_run.py` now skips Drive when env vars are unset, so it's purely
-   additive on top of the data-repo push.
-
-### Done
-
-- ✅ All three active dealers producing slot data (~402 slots/day total).
-- ✅ Wired `append_to_timeseries` into `run_daily.py` — every run also
-  updates `data/processed/timeseries.parquet`.
-- ✅ Scheduled via launchd at 9 AM daily (plist in `~/Library/LaunchAgents/`).
-- ✅ macOS notification on degraded or failed runs — silent on full
-  success, banner with sound when `success_count < dealers_attempted`.
-  Suppress with `--no-notify` for manual debugging.
-- ✅ ConnectCDK walker fully wired: catalog + disclaimer modal +
-  transport modal + slot XHR parser.
-- ✅ Analytics tooling (`scripts/analyze.py`) — answers the three
-  SPEC.md questions (network avg lead time, next-day rate, per-dealer
-  friction) plus an availability heatmap. Writes 4 PNGs +
-  `weekly_summary.md` to `data/reports/`.
-- ✅ Health-check script (`scripts/health_check.py`) — per-dealer
-  success rate over last N days, flags dealers with zero successes
-  (catches walker breakage that the per-run notification misses).
-- ✅ Generic dealer probe preserved at
-  `scripts/diagnostics/probe_dealer_page.py` for future debugging or
-  onboarding new dealers.
-- ✅ `SETUP.md` trimmed — now only documents the optional Drive
-  credentials; pipeline-state lives in this file.
-- ✅ `analyze.py` runs at the end of every daily run, so
-  `data/reports/` always reflects the latest observation (no manual
-  step needed).
-- ✅ Weekly health check scheduled — Sunday 10 AM via the
-  `com.colby.vw-scraper.weekly` launchd plist. Fires a banner if any
-  active dealer was silent the past 7 days.
-- ✅ Log rotation wired — `scripts/rotate_logs.py` runs nightly at 4 AM
-  via `com.colby.vw-scraper.logrotate`. Caps each log stream at
-  ~20MB (5MB × 4 rotations).
+1. **(monitor)** Watch the `scraper-health` GitHub issue. It now surfaces any
+   dealer regression within a day instead of silently degrading for weeks.
+2. **(yours)** Verify VW0003 Piazza dealer status — phone (610) 896-4853. If it
+   operates from a new web address, update the registry.
+3. **(yours, optional)** Set up Google Drive credentials per [`SETUP.md`](SETUP.md)
+   if you also want Drive mirroring (purely additive on top of the data-repo push).
 
 ## What's in good shape
 
-- 100 unit tests pass, mypy `--strict` clean.
-- Three-envelope Xtime parser covers consumer.xtime, TeamVelocity, and
-  legacy variants — adding new dealers on those platforms is a CSV row
-  append.
-- ConnectCDK parser is solid (handles bare list, dict-with-slot-key,
-  and ISO-string slot lists).
-- Real-world bug fixed: `RobotsCache` was being 403'd by DealerOn's
-  Varnish on its default `Python-urllib` UA, silently disallowing
-  Jeff. Now fetches `robots.txt` with our identifying UA.
-- Walker handles three Xtime UI variants (consumer.xtime SPA, Jeff's
-  iframe-embedded variant, TeamVelocity inline) and dismisses West
-  Islip's "Already a customer?" intercepting modal.
-- Output is idempotent: same-day re-runs replace the partition,
-  verified with `wc -l` on the JSONL across two runs.
+- ~120 unit tests pass, `mypy --strict` clean.
+- Three-envelope Xtime parser (consumer.xtime, TeamVelocity, legacy) — adding
+  dealers on those platforms is a CSV row append.
+- ConnectCDK parser handles bare list, dict-with-slot-key, and ISO-string lists.
+- Output is idempotent: same-day re-runs replace the partition / the date's
+  parquet rows, never duplicate.
+- Failure isolation: one broken dealer never kills the run (per-dealer 120s cap
+  + exception isolation).
