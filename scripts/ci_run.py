@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -36,14 +37,16 @@ from pathlib import Path
 
 import structlog
 
-from vw_scraper.alerts import send_slack_alert
+from vw_scraper.alerts import Severity, send_slack_alert
 from vw_scraper.orchestrator import RunMetadata, run_daily
 from vw_scraper.storage.drive import SyncSummary, build_drive_service, sync_outputs
+from vw_scraper.storage.timeseries import append_to_timeseries
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REGISTRY = REPO_ROOT / "data" / "dealer_master.csv"
 DEFAULT_DATA_DIR = REPO_ROOT / "data"
 DEFAULT_OUTPUT_DIR = DEFAULT_DATA_DIR / "raw"
+DEFAULT_TIMESERIES_PATH = DEFAULT_DATA_DIR / "processed" / "timeseries.parquet"
 
 _ENV_SA_PATH = "VW_SCRAPER_SA_PATH"
 _ENV_FOLDER_ID = "VW_SCRAPER_DRIVE_FOLDER_ID"
@@ -51,6 +54,29 @@ _ENV_FOLDER_ID = "VW_SCRAPER_DRIVE_FOLDER_ID"
 _DEGRADED_ERROR_RATE: float = 0.25
 
 log = structlog.get_logger()
+
+
+def _emit_alert(message: str, severity: Severity, *, alert_file: Path | None) -> None:
+    """Fan one alert out to every configured channel.
+
+    1. Slack webhook via `send_slack_alert` — a clean no-op when
+       `VW_SCRAPER_SLACK_WEBHOOK` is unset (kept for back-compat / optional use).
+    2. A JSON alert file the GitHub Actions workflow reads to open or update the
+       rolling `scraper-health` issue. Skipped when `alert_file` is None (e.g.
+       local runs). ci_run emits at most one alert per run, so a plain
+       overwrite is sufficient.
+    """
+    send_slack_alert(message, severity=severity)
+    if alert_file is None:
+        return
+    try:
+        alert_file.parent.mkdir(parents=True, exist_ok=True)
+        alert_file.write_text(
+            json.dumps({"severity": severity, "message": message}) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        log.error("ci_alert_file_write_failed", path=str(alert_file), error=str(exc))
 
 
 def _configure_logging(debug: bool) -> None:
@@ -93,6 +119,26 @@ def main(argv: list[str] | None = None) -> int:
         help="Max concurrent dealer scrapes (default: 5).",
     )
     parser.add_argument(
+        "--timeseries-path",
+        type=Path,
+        default=DEFAULT_TIMESERIES_PATH,
+        help="Path to the master timeseries parquet "
+        "(default: data/processed/timeseries.parquet). Appended after the "
+        "scrape so the data-repo push carries a current processed layer.",
+    )
+    parser.add_argument(
+        "--skip-timeseries",
+        action="store_true",
+        help="Write raw JSONL only; don't append to the master parquet.",
+    )
+    parser.add_argument(
+        "--alert-file",
+        type=Path,
+        default=None,
+        help="If set, write a JSON {severity, message} here on a degraded or "
+        "failed run for the workflow to turn into a GitHub issue.",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable DEBUG-level logs.",
@@ -131,11 +177,34 @@ def main(argv: list[str] | None = None) -> int:
         )
     except Exception as exc:  # noqa: BLE001 — alert and translate to exit code
         log.error("ci_run_daily_failed", error=str(exc))
-        send_slack_alert(
+        _emit_alert(
             f"Daily scrape failed before writing JSONL: {exc}",
             severity="error",
+            alert_file=args.alert_file,
         )
         return 1
+
+    # --- Phase 1.5: append to the master time-series -------------------------
+    # The cloud runner is the only place the processed layer is built, so the
+    # data-repo push (next workflow step) has a current parquet to ship. The
+    # workflow seeds today's runner with the existing parquet first, so this
+    # accumulates across days. Idempotent on observation_date (purge-and-
+    # replace), so re-runs are safe. A parquet failure must not lose the raw
+    # JSONL we just wrote, so it's logged, not fatal.
+    if not args.skip_timeseries:
+        jsonl_path = (
+            args.output_dir / metadata.observation_date.isoformat() / "observations.jsonl"
+        )
+        try:
+            args.timeseries_path.parent.mkdir(parents=True, exist_ok=True)
+            rows_written = append_to_timeseries(jsonl_path, args.timeseries_path)
+            log.info(
+                "ci_timeseries_appended",
+                rows_written=rows_written,
+                parquet_path=str(args.timeseries_path),
+            )
+        except Exception as exc:  # noqa: BLE001 — raw JSONL is already on disk
+            log.error("ci_timeseries_append_failed", error=str(exc))
 
     # --- Phase 2: sync to Drive (optional) ----------------------------------
     sync_summary: SyncSummary | None = None
@@ -148,12 +217,13 @@ def main(argv: list[str] | None = None) -> int:
             sync_summary = sync_outputs(service, args.data_dir, folder_id)
         except Exception as exc:  # noqa: BLE001 — alert; data is on an ephemeral runner
             log.error("ci_drive_sync_failed", error=str(exc))
-            send_slack_alert(
+            _emit_alert(
                 (
                     f"Drive sync failed after scrape "
                     f"(run_id={metadata.run_id}, date={metadata.observation_date}): {exc}"
                 ),
                 severity="error",
+                alert_file=args.alert_file,
             )
             return 1
     else:
@@ -174,23 +244,25 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if attempted > 0 and metadata.success_count == 0:
-        send_slack_alert(
+        _emit_alert(
             (
                 f"All {attempted} dealers failed "
                 f"(run_id={metadata.run_id}, date={metadata.observation_date})."
             ),
             severity="error",
+            alert_file=args.alert_file,
         )
         return 2
 
     if error_rate > _DEGRADED_ERROR_RATE:
-        send_slack_alert(
+        _emit_alert(
             (
                 f"Degraded run: {metadata.error_count}/{attempted} dealers failed "
                 f"({error_rate:.0%}) "
                 f"(run_id={metadata.run_id}, date={metadata.observation_date})."
             ),
             severity="warning",
+            alert_file=args.alert_file,
         )
 
     return 0

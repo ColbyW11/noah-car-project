@@ -8,6 +8,7 @@ field names stay in sync with the actual orchestrator contract.
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -16,7 +17,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from scripts import ci_run
+from vw_scraper.models import ScrapeResult, ScrapeStatus
 from vw_scraper.orchestrator import RunMetadata
+from vw_scraper.registry import Platform
 from vw_scraper.storage.drive import SyncSummary
 
 
@@ -68,6 +71,7 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, MagicMock]:
         "build_drive_service": MagicMock(return_value=MagicMock(name="drive_service")),
         "sync_outputs": MagicMock(return_value=_sync_summary()),
         "send_slack_alert": MagicMock(return_value=True),
+        "append_to_timeseries": MagicMock(return_value=0),
     }
     # run_daily is async; ci_run calls it via asyncio.run(coro). We intercept
     # asyncio.run so tests can inject the RunMetadata directly without needing
@@ -78,6 +82,9 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, MagicMock]:
     monkeypatch.setattr(ci_run, "build_drive_service", mocks["build_drive_service"])
     monkeypatch.setattr(ci_run, "sync_outputs", mocks["sync_outputs"])
     monkeypatch.setattr(ci_run, "send_slack_alert", mocks["send_slack_alert"])
+    # Stubbed by default so the unit tests don't read JSONL or write parquet;
+    # the dedicated integration test below exercises the real append.
+    monkeypatch.setattr(ci_run, "append_to_timeseries", mocks["append_to_timeseries"])
     return mocks
 
 
@@ -89,6 +96,9 @@ def _argv(registry: Path, tmp_path: Path) -> list[str]:
         str(tmp_path),
         "--output-dir",
         str(tmp_path / "raw"),
+        # Keep the parquet out of the real repo's data/ dir during tests.
+        "--timeseries-path",
+        str(tmp_path / "processed" / "timeseries.parquet"),
     ]
 
 
@@ -329,5 +339,166 @@ def test_run_daily_receives_expected_kwargs(
     assert kwargs["registry_path"] == registry
     assert kwargs["output_dir"] == env / "raw"
     assert kwargs["concurrency"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Time-series append (WS2: the cloud must build the processed layer)
+# ---------------------------------------------------------------------------
+
+
+def test_appends_to_timeseries_after_successful_scrape(
+    env: Path,
+    registry: Path,
+    wired: dict[str, MagicMock],
+) -> None:
+    """The cloud run must append to the parquet so the data-repo push ships a
+    current processed layer. We assert it's called with the day's JSONL and
+    the configured parquet path."""
+    wired["asyncio_run"].return_value = _make_metadata(attempted=5, success=5)
+
+    rc = ci_run.main(_argv(registry, env))
+
+    assert rc == 0
+    wired["append_to_timeseries"].assert_called_once()
+    jsonl_arg, parquet_arg = wired["append_to_timeseries"].call_args.args
+    assert jsonl_arg == env / "raw" / "2026-04-20" / "observations.jsonl"
+    assert parquet_arg == env / "processed" / "timeseries.parquet"
+
+
+def test_skip_timeseries_flag_does_not_append(
+    env: Path,
+    registry: Path,
+    wired: dict[str, MagicMock],
+) -> None:
+    wired["asyncio_run"].return_value = _make_metadata(attempted=5, success=5)
+
+    rc = ci_run.main(_argv(registry, env) + ["--skip-timeseries"])
+
+    assert rc == 0
+    wired["append_to_timeseries"].assert_not_called()
+
+
+def test_timeseries_append_failure_does_not_fail_run(
+    env: Path,
+    registry: Path,
+    wired: dict[str, MagicMock],
+) -> None:
+    """A parquet write failure must not lose the raw JSONL already on disk —
+    it's logged, the run still exits 0."""
+    wired["asyncio_run"].return_value = _make_metadata(attempted=5, success=5)
+    wired["append_to_timeseries"].side_effect = RuntimeError("parquet exploded")
+
+    rc = ci_run.main(_argv(registry, env))
+
+    assert rc == 0
+    wired["sync_outputs"].assert_called_once()
+
+
+def test_timeseries_append_real_end_to_end(
+    monkeypatch: pytest.MonkeyPatch,
+    registry: Path,
+    tmp_path: Path,
+) -> None:
+    """End-to-end against the real append_to_timeseries: write a day's JSONL,
+    run ci_run (Drive skipped), assert the parquet is created with the success
+    rows. Guards the WS2 contract that the cloud builds the processed layer."""
+    monkeypatch.delenv("VW_SCRAPER_SA_PATH", raising=False)
+    monkeypatch.delenv("VW_SCRAPER_DRIVE_FOLDER_ID", raising=False)
+
+    obs_date = date(2026, 4, 20)
+    raw_dir = tmp_path / "raw" / obs_date.isoformat()
+    raw_dir.mkdir(parents=True)
+    ts = datetime(2026, 4, 20, 13, 0, 0, tzinfo=timezone.utc)
+    result = ScrapeResult(
+        dealer_code="VW0004",
+        observation_ts=ts,
+        scrape_status=ScrapeStatus.SUCCESS,
+        error_message=None,
+        first_available_ts=ts,
+        lead_time_hours=24.0,
+        available_slots=[ts],
+        slot_count=1,
+        scheduling_flow_seconds=5.0,
+        interaction_steps=3,
+        platform=Platform.XTIME,
+        source_payload_hash="sha256:cafebabe",
+    )
+    (raw_dir / "observations.jsonl").write_text(result.model_dump_json() + "\n")
+
+    # Only the scrape is mocked; the real append runs against the JSONL above.
+    monkeypatch.setattr(ci_run.asyncio, "run", lambda _coro: _make_metadata(attempted=1, success=1))
+    monkeypatch.setattr(ci_run, "run_daily", MagicMock())
+
+    parquet_path = tmp_path / "processed" / "timeseries.parquet"
+    rc = ci_run.main(
+        [
+            "--registry", str(registry),
+            "--data-dir", str(tmp_path),
+            "--output-dir", str(tmp_path / "raw"),
+            "--timeseries-path", str(parquet_path),
+        ]
+    )
+
+    assert rc == 0
+    assert parquet_path.exists()
+    import polars as pl
+
+    df = pl.read_parquet(parquet_path)
+    assert df.height == 1
+    assert df["dealer_code"].to_list() == ["VW0004"]
+
+
+# ---------------------------------------------------------------------------
+# Alert file (WS1: workflow turns this into a GitHub issue)
+# ---------------------------------------------------------------------------
+
+
+def test_alert_file_written_on_degraded_run(
+    env: Path,
+    registry: Path,
+    tmp_path: Path,
+    wired: dict[str, MagicMock],
+) -> None:
+    wired["asyncio_run"].return_value = _make_metadata(attempted=5, success=3)
+    alert_file = tmp_path / "alert.json"
+
+    rc = ci_run.main(_argv(registry, env) + ["--alert-file", str(alert_file)])
+
+    assert rc == 0
+    assert alert_file.exists()
+    payload = json.loads(alert_file.read_text())
+    assert payload["severity"] == "warning"
+    assert "2/5" in payload["message"]
+
+
+def test_alert_file_written_on_all_failed(
+    env: Path,
+    registry: Path,
+    tmp_path: Path,
+    wired: dict[str, MagicMock],
+) -> None:
+    wired["asyncio_run"].return_value = _make_metadata(attempted=5, success=0)
+    alert_file = tmp_path / "alert.json"
+
+    rc = ci_run.main(_argv(registry, env) + ["--alert-file", str(alert_file)])
+
+    assert rc == 2
+    payload = json.loads(alert_file.read_text())
+    assert payload["severity"] == "error"
+
+
+def test_no_alert_file_on_clean_run(
+    env: Path,
+    registry: Path,
+    tmp_path: Path,
+    wired: dict[str, MagicMock],
+) -> None:
+    wired["asyncio_run"].return_value = _make_metadata(attempted=5, success=5)
+    alert_file = tmp_path / "alert.json"
+
+    rc = ci_run.main(_argv(registry, env) + ["--alert-file", str(alert_file)])
+
+    assert rc == 0
+    assert not alert_file.exists()
 
 
