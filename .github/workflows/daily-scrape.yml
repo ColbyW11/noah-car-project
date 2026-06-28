@@ -1,20 +1,30 @@
 name: Daily scrape
 
 # Runs the full pipeline unattended on GitHub Actions:
-#   1. Scrape every active dealer (scripts/ci_run.py).
-#   2. Push raw + processed outputs to the separate `vw-scraper-data` repo.
-#   3. Slack-alert on run-level exceptions or degraded runs (>25% dealer
-#      failures) — handled inside ci_run.py.
+#   1. Seed today's runner with the existing processed parquet from the data
+#      repo so the append accumulates across days (a fresh runner is empty).
+#   2. Scrape every active dealer + append to the processed time-series
+#      (scripts/ci_run.py).
+#   3. Push raw + processed outputs to the separate `vw-scraper-data` repo.
+#   4. On a degraded run (>25% dealer failures), an all-failed run, or an
+#      infrastructure failure (setup/push), open or update a single rolling
+#      `scraper-health` GitHub issue so the failure reaches a human. A fully
+#      healthy run closes any open health issue.
+#
+# Alerting needs no external secret — it uses the built-in GITHUB_TOKEN with
+# `issues: write`. ci_run.py also still calls send_slack_alert, which is a
+# clean no-op unless VW_SCRAPER_SLACK_WEBHOOK is ever set.
 #
 # Required GitHub Actions secrets:
-#   - VW_SCRAPER_SLACK_WEBHOOK: incoming-webhook URL for the alerts channel
 #   - VW_SCRAPER_DATA_TOKEN:    fine-grained PAT with contents:write on
 #                               the ColbyW11/vw-scraper-data repo
+# Optional:
+#   - VW_SCRAPER_SLACK_WEBHOOK: incoming-webhook URL — adds Slack on top of
+#                               the GitHub-issue alert.
 #
-# Drive sync is now opt-in: ci_run.py skips it when env vars are unset.
-# To re-enable Drive (in addition to or instead of the data-repo push),
-# set VW_SCRAPER_DRIVE_FOLDER_ID + GCP_SERVICE_ACCOUNT_JSON and re-add
-# the "Write service account JSON" + Drive-env-var steps from git history.
+# Drive sync is opt-in: ci_run.py skips it when env vars are unset. To
+# re-enable Drive, set VW_SCRAPER_DRIVE_FOLDER_ID + GCP_SERVICE_ACCOUNT_JSON
+# and re-add the "Write service account JSON" step from git history.
 
 on:
   schedule:
@@ -27,6 +37,7 @@ concurrency:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   scrape:
@@ -34,6 +45,7 @@ jobs:
     timeout-minutes: 30
     env:
       VW_SCRAPER_SLACK_WEBHOOK: ${{ secrets.VW_SCRAPER_SLACK_WEBHOOK }}
+      DATA_REPO: ${{ vars.VW_SCRAPER_DATA_REPO || 'ColbyW11/vw-scraper-data' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -49,37 +61,62 @@ jobs:
       - name: Install Playwright browsers
         run: uv run playwright install --with-deps chromium
 
+      - name: Seed processed parquet from data repo
+        # The append is incremental, but a fresh runner starts empty. Clone the
+        # data repo once (reused by the push step) and copy its current
+        # processed/timeseries.parquet into ./data/processed/ so ci_run.py
+        # appends today's rows onto the accumulated history instead of writing
+        # a single-day file. First run (no parquet yet) is a no-op.
+        env:
+          GH_TOKEN: ${{ secrets.VW_SCRAPER_DATA_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --depth=1 \
+            "https://x-access-token:${GH_TOKEN}@github.com/${DATA_REPO}.git" \
+            /tmp/data-repo
+          mkdir -p data/processed
+          if [ -f /tmp/data-repo/processed/timeseries.parquet ]; then
+            cp /tmp/data-repo/processed/timeseries.parquet data/processed/
+            echo "Seeded processed/timeseries.parquet from data repo."
+          else
+            echo "No existing parquet in data repo; starting fresh."
+          fi
+
       - name: Run daily pipeline
         id: pipeline
-        # ci_run.py: scrape + threshold check + Slack alert. Drive sync is
-        # skipped because VW_SCRAPER_SA_PATH / VW_SCRAPER_DRIVE_FOLDER_ID
-        # are not set in env — the next step handles persistence instead.
-        run: uv run python scripts/ci_run.py
+        # ci_run.py: scrape + append to timeseries + threshold check. On a
+        # degraded/all-failed run it writes $ALERT_FILE, which the alert step
+        # turns into a GitHub issue. Drive sync is skipped (env vars unset).
+        # ALERT_FILE is set per-step (the `runner` context isn't available in
+        # job-level env) and lives under RUNNER_TEMP, shared across steps.
+        env:
+          ALERT_FILE: ${{ runner.temp }}/alert.json
+        run: uv run python scripts/ci_run.py --alert-file "$ALERT_FILE"
 
       - name: Push outputs to data repo
+        id: push
         # Pushes ./data/raw/<today>/ and ./data/processed/timeseries.parquet
-        # to ColbyW11/vw-scraper-data, then commits and pushes. The data
-        # repo is private — only the daily run and Colby's laptop have
-        # write access (via the PAT).
+        # into the data-repo clone created by the seed step, then commits and
+        # pushes. The data repo is private — only the daily run and Colby's
+        # laptop have write access (via the PAT).
         #
-        # Always runs (even if the pipeline step partially failed) so we
-        # don't lose data that did get scraped. Adjust to `if: success()`
-        # if you'd rather keep the data repo clean of partial runs.
+        # Always runs (even if the pipeline step partially failed) so we don't
+        # lose data that did get scraped.
         if: always() && steps.pipeline.outcome != 'cancelled'
         env:
           GH_TOKEN: ${{ secrets.VW_SCRAPER_DATA_TOKEN }}
-          # Data repo URL (no protocol — we'll inject the token). Override
-          # via repo variable VW_SCRAPER_DATA_REPO if you rename it later.
-          DATA_REPO: ${{ vars.VW_SCRAPER_DATA_REPO || 'ColbyW11/vw-scraper-data' }}
         run: |
           set -euo pipefail
           if [ ! -d data/raw ] && [ ! -f data/processed/timeseries.parquet ]; then
             echo "No data produced by this run; skipping push."
             exit 0
           fi
-          git clone --depth=1 \
-            "https://x-access-token:${GH_TOKEN}@github.com/${DATA_REPO}.git" \
-            /tmp/data-repo
+          # The seed step already cloned the data repo; clone only if missing.
+          if [ ! -d /tmp/data-repo ]; then
+            git clone --depth=1 \
+              "https://x-access-token:${GH_TOKEN}@github.com/${DATA_REPO}.git" \
+              /tmp/data-repo
+          fi
           mkdir -p /tmp/data-repo/raw /tmp/data-repo/processed
           # rsync rather than cp -r so we don't duplicate the data/ dir layer.
           if [ -d data/raw ]; then
@@ -99,20 +136,52 @@ jobs:
             git push
           fi
 
-      - name: Alert on infrastructure failure
-        # ci_run.py self-alerts on its own exceptions, so this only catches
-        # the case where the workflow exploded before reaching the pipeline
-        # step (setup-uv, uv sync, playwright install) OR the push step
-        # failed. We send the Slack alert from the runner directly.
-        if: failure() && steps.pipeline.outcome != 'failure'
+      - name: Alert via GitHub issue
+        # Single source of alerting. Three cases:
+        #   - $ALERT_FILE present  -> ci_run flagged a degraded/all-failed run.
+        #   - pipeline/push failed -> infra failure (setup, scrape crash, push).
+        #   - otherwise healthy    -> close any open scraper-health issue.
+        # Maintains ONE rolling issue (label: scraper-health) so we get a
+        # notification + comment thread rather than a new issue every day.
+        if: always()
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PIPELINE_OUTCOME: ${{ steps.pipeline.outcome }}
+          PUSH_OUTCOME: ${{ steps.push.outcome }}
+          ALERT_FILE: ${{ runner.temp }}/alert.json
         run: |
-          uv run python - <<'PY'
-          import os
-          from vw_scraper.alerts import send_slack_alert
-          send_slack_alert(
-              f"Daily scrape workflow failed in setup or push step: {os.environ['RUN_URL']}",
-              severity="error",
-          )
-          PY
+          set -euo pipefail
+          gh label create scraper-health --repo "$REPO" --color FBCA04 \
+            --description "Daily scraper degraded/failed runs" --force >/dev/null 2>&1 || true
+
+          existing="$(gh issue list --repo "$REPO" --state open --label scraper-health \
+            --json number --jq '.[0].number // empty')"
+
+          if [ -f "$ALERT_FILE" ]; then
+            severity="$(jq -r .severity "$ALERT_FILE")"
+            message="$(jq -r .message "$ALERT_FILE")"
+          elif [ "$PIPELINE_OUTCOME" != "success" ] || [ "$PUSH_OUTCOME" != "success" ]; then
+            severity="error"
+            message="Workflow failed outside the scrape (pipeline=$PIPELINE_OUTCOME, push=$PUSH_OUTCOME)."
+          else
+            # Healthy run — resolve any open health issue and stop.
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" --repo "$REPO" \
+                --comment "✅ Healthy run — all dealers reporting. $RUN_URL"
+            fi
+            echo "Run healthy; no alert."
+            exit 0
+          fi
+
+          body="**Severity:** $severity"$'\n\n'"$message"$'\n\n'"Run: $RUN_URL"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+            echo "Updated scraper-health issue #$existing."
+          else
+            gh issue create --repo "$REPO" --label scraper-health \
+              --title "⚠️ Scraper health: degraded or failed daily run" \
+              --body "$body"
+            echo "Opened a new scraper-health issue."
+          fi

@@ -16,9 +16,13 @@ def pytest_collection_modifyitems(
     items: list[pytest.Item],
 ) -> None:
     markexpr = config.getoption("-m", default="") or ""
-    if "live" in markexpr:
-        return
+    # `browser` tests launch a local headless browser (no network) and are
+    # skipped by default for the same reason as `live` — they need the
+    # Playwright chromium binary and add startup cost to the fast unit suite.
     skip_live = pytest.mark.skip(reason="live test; run with `pytest -m live`")
+    skip_browser = pytest.mark.skip(reason="browser test; run with `pytest -m browser`")
     for item in items:
-        if "live" in item.keywords:
+        if "live" not in markexpr and "live" in item.keywords:
             item.add_marker(skip_live)
+        if "browser" not in markexpr and "browser" in item.keywords:
+            item.add_marker(skip_browser)

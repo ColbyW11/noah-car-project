@@ -51,6 +51,28 @@ log = structlog.get_logger()
 DEALER_TIMEOUT_SECONDS = 120
 NAVIGATION_TIMEOUT_MS = 30_000
 VIEWPORT: ViewportSize = {"width": 1280, "height": 1800}
+
+# Transportation step, in click-preference order. The modern consumer.xtime
+# SPA (observed 2026-06) renders each option as a
+# `<div class="panel-drop-off__slot" style="cursor:pointer">` row wrapping a
+# `<div role="checkbox" aria-label="I'll wait at the dealership"|"I have a
+# ride">`. The `.panel-drop-off__slot` ROW is the real click handler — same
+# lesson as the service step: a click on the nested role="checkbox" div leaves
+# the form invalid because the SPA's keyboard handler ignores synthesized
+# clicks on it, so the slot-availability XHR never fires. (An earlier build
+# used role="radio" on the option itself — kept as a legacy fallback.)
+# TeamVelocity inline (West Islip) still uses a <label>-wrapped <input radio>.
+# Any valid selection advances to the time step; we just need one to stick.
+TRANSPORT_OPTION_SELECTORS: tuple[tuple[str, str], ...] = (
+    ("transport wait slot (spa)", ".panel-drop-off__slot:has([role='checkbox'][aria-label*='wait' i])"),
+    ("transport ride slot (spa)", ".panel-drop-off__slot:has([role='checkbox'][aria-label*='ride' i])"),
+    ("transport first slot (spa)", ".panel-drop-off__slot"),
+    ("transport wait checkbox (spa)", "[role='checkbox'][aria-label*='wait' i]"),
+    ("transport wait radio (legacy)", "[role='radio'][aria-label*='wait' i]"),
+    ("transport drop radio (legacy)", "[role='radio'][aria-label*='drop' i]"),
+    ("transport wait label (tv)", "label:has-text('wait')"),
+    ("transport ride label (tv)", "label:has-text('ride')"),
+)
 SLOT_BUDGET_SAFETY_SECONDS = 2.0
 # Cap on response body bytes we'll try to JSON-decode. Xtime envelopes are
 # <100KB in practice; we cap at 1MB to avoid burning CPU on oversize bundles.
@@ -860,24 +882,10 @@ async def _walk_xtime_form(scope: FormScope, state: _ScrapeState, bound_log: Any
     #   - Consumer.xtime SPA: `<div role="radio" aria-label="<option>">`
     #   - TeamVelocity inline (West Islip): `<input type="radio" name="ride type">`
     #     wrapped in a `<label>` whose text identifies the option.
-    transport_patterns = (
-        "I will wait",          # TV label exact wording
-        "I'll wait",            # consumer.xtime SPA wording
-        "I have a ride",        # No transportation needed
-        "Wait",                 # broad fallback
-        "Drop",
-    )
-    for pattern in transport_patterns:
-        for selector in (
-            f"[role='radio'][aria-label*='{pattern}']",
-            f"label:has-text('{pattern}')",
-        ):
-            if await _try_click(scope, selector, f"transport: {pattern}", state, bound_log):
-                break
-        else:
-            continue
-        await asyncio.sleep(1.5)
-        break
+    for label, selector in TRANSPORT_OPTION_SELECTORS:
+        if await _try_click(scope, selector, label, state, bound_log):
+            await asyncio.sleep(1.5)
+            break
     for label, selector in (
         ("post-transport continue (spa)", "#continue_button"),
         ("post-transport next-a", "a#scheduleservicenext"),

@@ -3,7 +3,12 @@
 Scrapes VW dealer scheduling systems daily to build a time series of
 oil-change availability. The pilot tracks 3 dealers in the NY/PA
 metro area (Jeff D'Ambrosio, VW of West Islip, VW of Nanuet) and
-captures ~400 timeslots per daily run.
+captures ~300–400 timeslots per daily run.
+
+**Production runs on GitHub Actions** (`.github/workflows/daily-scrape.yml`),
+not a laptop — daily at 13:00 UTC on a fresh runner, pushing data to the
+private `vw-scraper-data` repo, alerting via a rolling `scraper-health` GitHub
+issue. See [`STATUS.md`](./STATUS.md).
 
 **Start here for current state**: [`STATUS.md`](./STATUS.md) — which
 dealers are working, what's pending, how the scheduled job is wired,
@@ -12,8 +17,8 @@ how to run anything manually.
 Other reference docs:
 - [`SPEC.md`](./SPEC.md) — authoritative project definition + data model
 - [`CLAUDE.md`](./CLAUDE.md) — coding conventions
-- [`DEPLOY.md`](./DEPLOY.md) — production deployment plan (3 paths
-  with tradeoffs; recommended path for a small startup)
+- [`DEPLOY.md`](./DEPLOY.md) — deployment options & tradeoffs (GitHub
+  Actions, the **current** production path, plus scale-up options)
 - [`SLICES.md`](./SLICES.md) — historical build plan (slices 0–10, all
   completed)
 - [`SETUP.md`](./SETUP.md) — _optional_ Google Drive / GitHub Actions
@@ -45,17 +50,18 @@ uv run python scripts/health_check.py
 uv run streamlit run scripts/dashboard.py
 ```
 
-## Scheduled runs (macOS launchd)
+## Scheduled runs (GitHub Actions — production)
 
-Two jobs run on your laptop unattended. Full operational details live
-in [`STATUS.md`](./STATUS.md#how-it-runs).
+The daily scrape runs in the cloud, not on a laptop. Full operational
+details live in [`STATUS.md`](./STATUS.md#how-it-runs-production).
 
-| When | Job | What it does |
+| When | Where | What it does |
 | --- | --- | --- |
-| Daily 9 AM | `com.colby.vw-scraper.daily` | Scrape → JSONL + parquet → regenerate report. macOS notification on failure. |
-| Sunday 10 AM | `com.colby.vw-scraper.weekly` | Health check — banner if any active dealer was silent the past 7 days. |
+| Daily 13:00 UTC | `.github/workflows/daily-scrape.yml` | Seed parquet → scrape all active dealers → append time-series → push `raw/` + `processed/` to `vw-scraper-data` → alert via `scraper-health` GitHub issue on degraded/failed runs. |
 
-Plists are in `~/Library/LaunchAgents/`; logs in `~/Library/Logs/`.
+The macOS launchd jobs are **retired** (the cloud is authoritative); plists
+remain on disk and can be re-loaded with `launchctl bootstrap` — see
+[`STATUS.md`](./STATUS.md#local-mode-retired).
 
 ## Interactive dashboard
 
